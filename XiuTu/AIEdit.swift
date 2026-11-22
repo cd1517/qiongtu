@@ -121,6 +121,7 @@ enum AIPresetGroup: String, CaseIterable, Identifiable {
                 AIPreset(title: "一键修复", symbol: "wand.and.stars", prompt: "你是一位摄影大师兼调色师。先判断这张照片在曝光和色彩上的毛病（过曝或欠曝、逆光导致主体太暗、高光溢出、暗部死黑、偏色和白平衡不准、灰雾、反差不足或过头），然后把它调成一张曝光和色彩都正确、自然好看的照片。只改曝光、明暗和颜色；不要移动、裁剪、旋转或改变画面里任何东西的形状和位置，结果要和原图逐像素对齐。", toneOnly: true),
                 AIPreset(title: "修跑焦", symbol: "camera.viewfinder", prompt: AIIntent.refocusPrompt, faceCrop: true),
                 AIPreset(title: "修手抖", symbol: "hand.raised.slash", prompt: AIIntent.deshakePrompt),
+                AIPreset(title: "去 AI 味", symbol: "camera.aperture", prompt: "这张照片看起来有明显的 AI 生成感。把它处理成一张真正用相机拍出来的照片：去掉过度锐化和边缘白边，细节恢复成镜头自然的清晰度（焦外和远处自然地柔一点）；皮肤要有真实的毛孔和细微的不均匀，不要塑料感和过度磨皮；降低过高的饱和度、过度的 HDR 和处处都亮的均匀光，恢复真实的明暗层次和阴影；去掉过分完美对称、过分干净的痕迹，保留真实世界里自然的小瑕疵。不要额外加胶片颗粒。画面内容、构图、人物长相、姿势和服装都不变。"),
                 AIPreset(title: "修过曝", symbol: "sun.max", prompt: "修复过曝：找回高光里的层次，压住发白的天空和皮肤。只改曝光、明暗和颜色；不要移动、裁剪、旋转或改变画面里任何东西的形状和位置，结果要和原图逐像素对齐。", toneOnly: true),
                 AIPreset(title: "修逆光", symbol: "sun.horizon", prompt: "修复逆光和欠曝：把人物和暗部提亮到正常，像补了一盏柔和的面光；保留背景亮部的层次，不要发灰。只改曝光、明暗和颜色；不要移动、裁剪、旋转或改变画面里任何东西的形状和位置，结果要和原图逐像素对齐。", toneOnly: true),
                 AIPreset(title: "去紫边", symbol: "rainbow", prompt: "去掉高反差边缘上的紫边、蓝边和绿边（色差），其他不变。"),
