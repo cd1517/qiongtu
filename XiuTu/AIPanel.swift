@@ -226,7 +226,7 @@ struct AIPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             // 改形状的（美体、美发）没有"只取光影"这回事。
-            if !model.aiGroup.isHair, model.aiGroup != .body, !model.aiResultReframed {
+            if !model.aiGroup.isHair, model.aiGroup != .body, !model.aiResultReframed, !model.aiResultFused {
                 HStack(spacing: 8) {
                     Chip(title: "只取光影色彩", selected: model.aiToneOnly) { model.setAIToneOnly(true) }
                     Chip(title: "完整采用 AI 图", selected: !model.aiToneOnly) { model.setAIToneOnly(false) }
@@ -245,7 +245,18 @@ struct AIPanel: View {
                     .frame(width: 34, alignment: .trailing)
             }
             }
+            HStack(spacing: 12) {
+                Text("柔化")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.dim)
+                Slider(value: Binding(get: { Double(model.aiSoften) }, set: { model.setAISoften(CGFloat($0)) }), in: 0...1)
+                Text("\(Int((model.aiSoften * 100).rounded()))")
+                    .font(.system(size: 14, weight: .semibold))
+                    .monospacedDigit()
+                    .frame(width: 34, alignment: .trailing)
+            }
             HStack(spacing: 10) {
+                if !model.aiResultFused {
                 Button { model.runAI() } label: {
                     Label("再生成一次", systemImage: "arrow.clockwise")
                         .font(.system(size: 14, weight: .semibold))
@@ -254,6 +265,7 @@ struct AIPanel: View {
                         .background(Theme.chip, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                }
                 Button { model.discardAIResult() } label: {
                     Label("不要了，换一个", systemImage: "arrow.uturn.backward")
                         .font(.system(size: 14, weight: .semibold))

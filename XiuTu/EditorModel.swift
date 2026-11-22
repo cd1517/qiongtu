@@ -98,6 +98,10 @@ final class EditorModel {
     var aiHasResult = false
 
     var aiStrength: CGFloat = 1
+    /// 柔化：压 AI 结果过头的锐化。整张重画的结果默认 30。
+    var aiSoften: CGFloat = 0.3
+    /// 当前结果是图层 AI 融合来的（不能"再生成一次"）。
+    private(set) var aiResultFused = false
     /// 当前指令是不是"没涂抹就自动只处理头部"的那一类（修跑焦）。
     var aiFaceCrop = false
     /// 美发类指令：没涂抹时自动找到人脸，把头和头发这一大块发给 AI（比修跑焦的范围大，长发也能包住）。
@@ -394,7 +398,20 @@ final class EditorModel {
         aiFrame = nil
         aiEllipse = nil
         aiStrength = 1
+        aiSoften = 0.3
+        aiResultFused = false
         aiToneOnly = false
+    }
+
+    /// 图层融合完：结果放进 AI 修图的结果面板，可以调强度和柔化，点 ✓ 才算数。
+    func showFusedResult(_ image: CGImage) {
+        begin(.ai)
+        guard tool == .ai else { return }
+        aiResult = image
+        aiHasResult = true
+        aiResultFused = true
+        aiSoften = 0.35
+        renderAI()
     }
 
     /// 从滤镜里点了一位大师：转到 AI 修图，带上这位大师的指令并直接开始生成。
@@ -1074,11 +1091,13 @@ final class EditorModel {
     private var currentAIEdit: AIEdit? {
         guard let result = aiResult else { return nil }
         // "只取光影色彩"只属于 AI 修图；美颜要的就是 AI 改过的脸，不能套这个模式。
+        // 柔化只给整张重画的结果用；美颜只换脸部那一块，不柔化。
+        let soften = tool == .ai && aiFrame == nil && !aiHasRegion ? aiSoften : 0
         if aiResultReframed {
-            return AIEdit(result: result, strokes: [], reframed: true)
+            return AIEdit(result: result, strokes: [], reframed: true, soften: soften)
         }
         return AIEdit(result: result, strokes: aiStrokes, frame: aiFrame, ellipse: aiEllipse, strength: aiStrength,
-                      toneOnly: aiToneOnly && tool == .ai)
+                      toneOnly: aiToneOnly && tool == .ai, soften: soften)
     }
 
     private func renderAI() {
@@ -1095,6 +1114,11 @@ final class EditorModel {
 
     func setAIToneOnly(_ on: Bool) {
         aiToneOnly = on
+        renderAI()
+    }
+
+    func setAISoften(_ value: CGFloat) {
+        aiSoften = min(max(value, 0), 1)
         renderAI()
     }
 

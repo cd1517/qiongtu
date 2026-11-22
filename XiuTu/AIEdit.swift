@@ -352,6 +352,19 @@ struct AIEdit {
     var toneOnly = false
     /// 换了画幅的构图：结果整张替换原图，画面比例跟着 AI 的结果走。
     var reframed = false
+    /// 0...1，把 AI 结果过头的锐化压下去，在本机调。
+    var soften: CGFloat = 0
+
+    /// AI 出图常常锐化过头：和模糊过的自己混一下，边缘的白边和沙沙的纹理就下去了。
+    static func softened(_ r: CIImage, amount: CGFloat) -> CIImage {
+        guard amount > 0.005 else { return r }
+        let e = r.extent
+        let dim = max(e.width, e.height)
+        let blurred = r.clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: dim * (0.0006 + 0.0012 * amount)])
+            .cropped(to: e)
+        return FX.mix(r, blurred, t: min(1, amount * 0.9))
+    }
 
     var hasRegion: Bool { strokes.contains { !$0.erase } }
 
@@ -362,8 +375,9 @@ struct AIEdit {
             let r = CIImage(cgImage: result)
             let k = max(extent.width, extent.height) / max(r.extent.width, r.extent.height)
             let w = (r.extent.width * k).rounded(), h = (r.extent.height * k).rounded()
-            return r.transformed(by: CGAffineTransform(scaleX: w / r.extent.width, y: h / r.extent.height))
+            let out = r.transformed(by: CGAffineTransform(scaleX: w / r.extent.width, y: h / r.extent.height))
                 .cropped(to: CGRect(x: 0, y: 0, width: w, height: h))
+            return Self.softened(out, amount: soften)
         }
         var target = extent
         if let f = frame {
@@ -377,6 +391,7 @@ struct AIEdit {
             .clampedToExtent()
             .cropped(to: extent)
         if toneOnly { r = ToneTransfer.apply(original: image, graded: r) }
+        r = Self.softened(r, amount: soften)
 
         var mask: CIImage?
         if let ellipse {

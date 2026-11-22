@@ -153,7 +153,14 @@ extension EditorModel {
                 self.layerState.fusing = false
                 // 历史：下面的照片 → 图层 → 融合结果 → 之后的步骤。
                 let fused = AIEdit(result: final, strokes: [])
-                self.replaceOps(state.prefix + [.layers(stack), .ai(fused)] + state.suffix)
+                if state.suffix.isEmpty {
+                    // 先把图层这一步存下，再把融合结果放进结果面板，调好柔化再确认。
+                    self.replaceOps(state.prefix + [.layers(stack)]) { [weak self] in self?.showFusedResult(final) }
+                } else {
+                    var soft = fused
+                    soft.soften = 0.35
+                    self.replaceOps(state.prefix + [.layers(stack), .ai(soft)] + state.suffix)
+                }
             } catch {
                 guard let self, self.tool == .layers else { return }
                 self.layerState.busy = false
