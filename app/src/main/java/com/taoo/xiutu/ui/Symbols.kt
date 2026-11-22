@@ -173,4 +173,9 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "link" to Icons.Filled.Link,
     "server.rack" to Icons.Filled.Dns,
     "antenna.radiowaves.left.and.right" to Icons.Filled.WifiTethering,
+    // 文字 / 贴纸
+    "nosign" to Icons.Filled.Block,
+    "plus.square.on.square" to Icons.Filled.LibraryAdd,
+    "arrow.up.left.and.arrow.down.right" to Icons.Filled.OpenInFull,
+    "arrow.down.circle" to Icons.Filled.ArrowCircleDown,
 )
