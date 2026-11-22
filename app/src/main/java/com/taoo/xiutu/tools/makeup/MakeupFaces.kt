@@ -18,8 +18,8 @@ import kotlin.math.roundToInt
  */
 object MakeupFaces {
     fun detect(image: Bitmap): List<FaceInfo> {
-        val found = FaceDetector.detect(image)
-        return found.map { f -> if (f.hasReliableLandmarks) f else runCatching { refine(image, f) }.getOrNull() ?: f }
+        // 缺轮廓的脸裁出来再找一次，这件事 FaceDetector 已经做了
+        return FaceDetector.detect(image)
     }
 
     private fun refine(image: Bitmap, face: FaceInfo): FaceInfo? {

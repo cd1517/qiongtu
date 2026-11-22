@@ -70,8 +70,63 @@ object FaceDetector {
         )
     }
 
+    /**
+     * 找脸。ML Kit 只给够大、最显眼的那张脸算五官轮廓（脸小于约 200 像素时一个都不给），
+     * 所以缺轮廓的脸再单独裁出来放大找一次，坐标换回整张图。
+     */
     fun detect(image: Bitmap): List<FaceInfo> {
         check(Looper.myLooper() != Looper.getMainLooper()) { "FaceDetector.detect 要在后台线程调用" }
+        val found = detectRaw(image)
+        return found.map { f -> if (f.hasReliableLandmarks) f else runCatching { refine(image, f) }.getOrNull() ?: f }
+    }
+
+    /** 裁出一张脸（脸宽 2.2 倍的方块），放大到至少 640 再找一次。 */
+    private fun refine(image: Bitmap, face: FaceInfo): FaceInfo? {
+        val w = image.width.toFloat()
+        val h = image.height.toFloat()
+        val side = kotlin.math.max(face.box.width() * w, face.box.height() * h) * 2.2f
+        val cx = face.box.centerX() * w
+        val cy = face.box.centerY() * h
+        val x0 = kotlin.math.max(0, (cx - side / 2).toInt())
+        val y0 = kotlin.math.max(0, (cy - side / 2).toInt())
+        val x1 = kotlin.math.min(image.width, (cx + side / 2).toInt())
+        val y1 = kotlin.math.min(image.height, (cy + side / 2).toInt())
+        val cw = x1 - x0
+        val ch = y1 - y0
+        if (cw < 24 || ch < 24) return null
+        var crop = Bitmap.createBitmap(image, x0, y0, cw, ch)
+        if (kotlin.math.max(cw, ch) < 640) {
+            val k = 640f / kotlin.math.max(cw, ch)
+            crop = Bitmap.createScaledBitmap(crop, (cw * k).toInt(), (ch * k).toInt(), true)
+        }
+        fun map(p: PointF) = PointF((x0 + p.x * cw) / w, (y0 + p.y * ch) / h)
+        // 裁出来的图里可能还带着别人的半张脸：取换回去以后离原来那张脸最近、而且落在它框里的
+        val best = detectRaw(crop).filter { it.hasReliableLandmarks }.minByOrNull { c ->
+            val m = map(PointF(c.box.centerX(), c.box.centerY()))
+            kotlin.math.hypot(m.x - face.box.centerX(), m.y - face.box.centerY())
+        } ?: return null
+        val center = map(PointF(best.box.centerX(), best.box.centerY()))
+        if (!face.box.contains(center.x, center.y)) return null
+        val tl = map(PointF(best.box.left, best.box.top))
+        val br = map(PointF(best.box.right, best.box.bottom))
+        return best.copy(
+            box = RectF(tl.x, tl.y, br.x, br.y),
+            contour = best.contour.map(::map),
+            leftEye = best.leftEye.map(::map),
+            rightEye = best.rightEye.map(::map),
+            leftBrow = best.leftBrow.map(::map),
+            rightBrow = best.rightBrow.map(::map),
+            outerLips = best.outerLips.map(::map),
+            innerLips = best.innerLips.map(::map),
+            nose = best.nose.map(::map),
+            leftPupil = best.leftPupil?.let(::map),
+            rightPupil = best.rightPupil?.let(::map),
+            noseCrest = best.noseCrest?.map(::map),
+            medianLine = best.medianLine?.map(::map),
+        ).takeIf { it.hasReliableLandmarks }
+    }
+
+    private fun detectRaw(image: Bitmap): List<FaceInfo> {
         val bmp = if (image.config == Bitmap.Config.HARDWARE || image.config == null) image.copy(Bitmap.Config.ARGB_8888, false) else image
         val w = bmp.width.toFloat()
         val h = bmp.height.toFloat()
