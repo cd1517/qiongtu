@@ -11,7 +11,7 @@ enum Theme {
 /// 编辑器里的各个工具。
 enum Tool: String, Hashable, Identifiable {
     case crop, filter, adjust, mosaic, text, sticker, ai, beauty, liquify
-    case doodle, mark, frame, backdrop, collage, layers, reshape, makeup, skin, shape
+    case doodle, mark, frame, backdrop, collage, layers, reshape, makeup, skin, shape, effect
 
     var id: String { rawValue }
 
@@ -36,6 +36,7 @@ enum Tool: String, Hashable, Identifiable {
         case .makeup: return "美妆"
         case .skin: return "皮肤"
         case .shape: return "塑形"
+        case .effect: return "特效"
         }
     }
 
@@ -60,6 +61,7 @@ enum Tool: String, Hashable, Identifiable {
         case .makeup: return "paintbrush.pointed"
         case .skin: return "sparkle"
         case .shape: return "figure.arms.open"
+        case .effect: return "sparkles.rectangle.stack"
         }
     }
 }
@@ -216,9 +218,31 @@ struct SegmentBar<Item: Identifiable & Equatable>: View {
     let selected: Item
     let title: (Item) -> String
     var symbol: ((Item) -> String)? = nil
+    /// 放不下时改成可以左右滑，每格按内容宽度排。
+    var scrolls = false
     var select: (Item) -> Void
 
     var body: some View {
+        if scrolls {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    row.padding(3)
+                }
+                .background(Theme.chip, in: Capsule())
+                .clipShape(Capsule())
+                .onAppear { proxy.scrollTo(selected.id, anchor: .center) }
+                .onChange(of: selected) { _, item in
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(item.id, anchor: .center) }
+                }
+            }
+        } else {
+            row
+                .padding(3)
+                .background(Theme.chip, in: Capsule())
+        }
+    }
+
+    private var row: some View {
         HStack(spacing: 0) {
             ForEach(items) { item in
                 let on = item == selected
@@ -230,18 +254,18 @@ struct SegmentBar<Item: Identifiable & Equatable>: View {
                         Text(title(item))
                             .font(.system(size: 14, weight: on ? .semibold : .regular))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                            .minimumScaleFactor(scrolls ? 1 : 0.8)
                     }
                     .foregroundStyle(on ? Color.black : Color.white)
-                    .frame(maxWidth: .infinity, minHeight: 32)
+                    .padding(.horizontal, scrolls ? 10 : 0)
+                    .frame(maxWidth: scrolls ? nil : .infinity, minHeight: 32)
                     .background(on ? Color.white : Color.clear, in: Capsule())
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .id(item.id)
             }
         }
-        .padding(3)
-        .background(Theme.chip, in: Capsule())
     }
 }
 

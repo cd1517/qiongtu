@@ -158,7 +158,7 @@ extension EditorModel {
                     self.replaceOps(state.prefix + [.layers(stack)]) { [weak self] in self?.showFusedResult(final) }
                 } else {
                     var soft = fused
-                    soft.soften = 0.35
+                    soft.soften = 0
                     self.replaceOps(state.prefix + [.layers(stack), .ai(soft)] + state.suffix)
                 }
             } catch {

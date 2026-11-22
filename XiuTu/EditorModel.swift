@@ -99,7 +99,7 @@ final class EditorModel {
 
     var aiStrength: CGFloat = 1
     /// 柔化：压 AI 结果过头的锐化。整张重画的结果默认 30。
-    var aiSoften: CGFloat = 0.3
+    var aiSoften: CGFloat = 0
     /// 当前结果是图层 AI 融合来的（不能"再生成一次"）。
     private(set) var aiResultFused = false
     /// 当前指令是不是"没涂抹就自动只处理头部"的那一类（修跑焦）。
@@ -147,6 +147,8 @@ final class EditorModel {
 
     /// 滤镜里的"拍立得"：状态和实现在 EditorModel+Instant 里。
     var instantState = InstantState()
+    /// 特效：状态和实现在 EditorModel+Effect 里。
+    var effectState = EffectState()
 
     /// 重新打开历史里的某一步来改（装饰类工具）时记下的东西；nil = 这次是新加一步。
     private struct Reopened {
@@ -365,6 +367,8 @@ final class EditorModel {
             beginSkin()
         case .shape:
             beginShape()
+        case .effect:
+            beginEffect()
         case .beauty:
             resetAI()
             beauty = BeautyParams()
@@ -398,7 +402,7 @@ final class EditorModel {
         aiFrame = nil
         aiEllipse = nil
         aiStrength = 1
-        aiSoften = 0.3
+        aiSoften = 0
         aiResultFused = false
         aiToneOnly = false
     }
@@ -410,7 +414,7 @@ final class EditorModel {
         aiResult = image
         aiHasResult = true
         aiResultFused = true
-        aiSoften = 0.35
+        aiSoften = 0
         renderAI()
     }
 
@@ -458,6 +462,11 @@ final class EditorModel {
             for (title, look) in MasterPreview.looks {
                 if let cg = Renderer.shared.cgImage(look.apply(to: raster.ci, intensity: 1)) {
                     thumbs[title] = UIImage(cgImage: cg)
+                }
+            }
+            for preset in CreativeKind.all {
+                if let out = CreativePreview.render(preset.title, raster.ci), let cg = Renderer.shared.cgImage(out) {
+                    thumbs[preset.title] = UIImage(cgImage: cg)
                 }
             }
             await self?.setMasterThumbs(thumbs)
@@ -574,6 +583,8 @@ final class EditorModel {
                 reopenFrame(params)
             case .backdrop(let params):
                 reopenBackdrop(params)
+            case .effect(let params):
+                reopenEffect(params)
             default:
                 break
             }
@@ -686,6 +697,8 @@ final class EditorModel {
             op = skinOp()
         case .shape:
             op = shapeOp()
+        case .effect:
+            op = effectOp()
         case .beauty:
             // 每张脸的 AI 美颜和手动美颜各算一步，撤销时可以分开撤。
             if !aiRunning {
@@ -806,6 +819,8 @@ final class EditorModel {
             return makeupPendingOps()
         case .some(.skin):
             return skinPendingOps()
+        case .some(.effect):
+            return effectPendingOps()
         default:
             return nil
         }

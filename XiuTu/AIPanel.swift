@@ -56,6 +56,7 @@ struct AIPanel: View {
     var openSettings: () -> Void
 
     private let settings = AISettings.shared
+    @State private var creativeKind: CreativeKind = .comic
 
     var body: some View {
         VStack(spacing: 10) {
@@ -88,7 +89,7 @@ struct AIPanel: View {
                 ProviderMenu(openSettings: openSettings, compact: true)
             } else {
                 SegmentBar(items: AIPresetGroup.editGroups, selected: model.aiGroup,
-                           title: { $0.title }, symbol: { $0.symbol }) { model.aiGroup = $0 }
+                           title: { $0.title }, symbol: { $0.symbol }, scrolls: true) { model.aiGroup = $0 }
                 ProviderMenu(openSettings: openSettings, iconOnly: true)
             }
         }
@@ -117,6 +118,15 @@ struct AIPanel: View {
         let master = model.aiGroup.usesTonePreview
         let pictures = master || model.aiGroup == .hairStyle
         return VStack(spacing: 10) {
+            if model.aiGroup == .creative {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(CreativeKind.allCases) { kind in
+                            Chip(title: kind.title, symbol: kind.symbol, selected: creativeKind == kind) { creativeKind = kind }
+                        }
+                    }
+                }
+            }
             if model.aiGroup == .compose {
                 // 构图可以换画幅：横图改竖图、竖图改横图。
                 HStack(spacing: 8) {
@@ -128,8 +138,10 @@ struct AIPanel: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: pictures ? 10 : 4) {
-                    ForEach(model.aiGroup.presets) { preset in
-                        if master {
+                    ForEach(model.aiGroup == .creative ? creativeKind.presets : model.aiGroup.presets) { preset in
+                        if model.aiGroup == .creative, model.masterThumbs[preset.title] == nil {
+                            CreativeArtTile(title: preset.title, symbol: preset.symbol, kind: creativeKind) { start(preset) }
+                        } else if master {
                             ImageTile(title: preset.title, image: model.masterThumbs[preset.title],
                                       symbol: model.aiGroup.symbol, badge: "AI") { start(preset) }
                         } else if let tint = preset.tint {
@@ -152,7 +164,7 @@ struct AIPanel: View {
                 .padding(.bottom, 2)
             }
             .padding(.horizontal, -16)
-            .id(model.aiGroup)
+            .id(model.aiGroup == .creative ? "creative-" + creativeKind.rawValue : model.aiGroup.rawValue)
             HStack(spacing: 10) {
                 Text("涂抹")
                     .font(.system(size: 13))
@@ -226,7 +238,7 @@ struct AIPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             // 改形状的（美体、美发）没有"只取光影"这回事。
-            if !model.aiGroup.isHair, model.aiGroup != .body, !model.aiResultReframed, !model.aiResultFused {
+            if !model.aiGroup.isHair, model.aiGroup != .body, model.aiGroup != .creative, !model.aiResultReframed, !model.aiResultFused {
                 HStack(spacing: 8) {
                     Chip(title: "只取光影色彩", selected: model.aiToneOnly) { model.setAIToneOnly(true) }
                     Chip(title: "完整采用 AI 图", selected: !model.aiToneOnly) { model.setAIToneOnly(false) }
@@ -288,5 +300,48 @@ struct AIPanel: View {
                 .background(active ? Theme.accent : Theme.chip, in: Circle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// 创意玩法里本机模拟不了的那些（加分身、加东西、换场景）：色块渐变 + 图标。
+struct CreativeArtTile: View {
+    let title: String
+    let symbol: String
+    let kind: CreativeKind
+    var action: () -> Void
+
+    private var colors: [Color] {
+        switch kind {
+        case .comic: return [Color(red: 0.98, green: 0.55, blue: 0.62), Color(red: 0.5, green: 0.36, blue: 0.85)]
+        case .cartoon: return [Color(red: 1, green: 0.78, blue: 0.35), Color(red: 0.98, green: 0.45, blue: 0.5)]
+        case .art: return [Color(red: 0.45, green: 0.7, blue: 0.85), Color(red: 0.25, green: 0.3, blue: 0.55)]
+        case .twin: return [Color(red: 0.55, green: 0.85, blue: 0.8), Color(red: 0.3, green: 0.45, blue: 0.8)]
+        case .fun: return [Color(red: 1, green: 0.6, blue: 0.3), Color(red: 0.85, green: 0.25, blue: 0.45)]
+        case .mood: return [Color(red: 0.95, green: 0.7, blue: 0.45), Color(red: 0.35, green: 0.25, blue: 0.5)]
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                ZStack {
+                    LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+                    Image(systemName: symbol)
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+                }
+                .frame(width: 68, height: 84)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(alignment: .topTrailing) { CornerBadge(text: "AI").padding(4) }
+                Text(title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(width: 68)
+            }
+        }
+        .buttonStyle(PressStyle())
     }
 }

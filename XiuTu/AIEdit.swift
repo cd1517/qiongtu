@@ -50,7 +50,7 @@ enum AIIntent {
 }
 
 enum AIPresetGroup: String, CaseIterable, Identifiable {
-    case fix, light, remove, compose, master, camera, body
+    case fix, light, remove, compose, master, camera, creative, body
     case hairStyle, hairColor, hairCare
 
     var id: String { rawValue }
@@ -63,6 +63,7 @@ enum AIPresetGroup: String, CaseIterable, Identifiable {
         case .compose: return "构图"
         case .master: return "大师"
         case .camera: return "相机"
+        case .creative: return "创意"
         case .body: return "AI 美体"
         case .hairStyle: return "发型"
         case .hairColor: return "染发"
@@ -76,13 +77,19 @@ enum AIPresetGroup: String, CaseIterable, Identifiable {
     var isHair: Bool { Self.hairGroups.contains(self) }
 
     /// AI 修图面板里的四组；AI 美体单独放在"美体"里。
-    static let editGroups: [AIPresetGroup] = [.fix, .light, .remove, .compose, .master, .camera]
+    static let editGroups: [AIPresetGroup] = [.fix, .light, .remove, .compose, .master, .camera, .creative]
 
     /// 主菜单里的名字（面板里的分段标签用更短的 title）。
-    var menuTitle: String { self == .camera ? "相机质感" : title }
+    var menuTitle: String {
+        switch self {
+        case .camera: return "相机质感"
+        case .creative: return "创意玩法"
+        default: return title
+        }
+    }
 
     /// 这一组的按钮是不是用图片（小图是本机模拟的大致色调）。
-    var usesTonePreview: Bool { self == .master || self == .camera || self == .light }
+    var usesTonePreview: Bool { self == .master || self == .camera || self == .light || self == .creative }
 
     var symbol: String {
         switch self {
@@ -92,6 +99,7 @@ enum AIPresetGroup: String, CaseIterable, Identifiable {
         case .compose: return "crop"
         case .master: return "camera.aperture"
         case .camera: return "camera"
+        case .creative: return "theatermasks"
         case .body: return "figure.stand"
         case .hairStyle: return "scissors"
         case .hairColor: return "paintpalette"
@@ -108,6 +116,7 @@ enum AIPresetGroup: String, CaseIterable, Identifiable {
         case .compose: return "会重新安排画面，整张图由 AI 重画，分辨率以 AI 输出为准。"
         case .master: return "按这位摄影师的典型风格重新处理光线、色彩和影调；整张图交给 AI 重画。"
         case .camera: return "把手机拍的照片处理成这台相机拍出来的质感；整张图交给 AI 重画。"
+        case .creative: return "把照片画成别的风格，或者加点好玩的东西；整张图交给 AI 重画。"
         case .body: return "调整身材比例。只想改局部时先涂抹。"
         case .hairStyle, .hairColor, .hairCare:
             return "只把头和头发这一块发给 AI，脸尽量保持原样；每点一次计一次费。"
@@ -220,6 +229,8 @@ enum AIPresetGroup: String, CaseIterable, Identifiable {
                 AIPreset(title: "大光圈人像", symbol: "camera", prompt: "这是一张手机拍的照片。把它处理成用全画幅相机配 85mm f/1.2 镜头全开光圈拍出来的样子：人物清晰锐利，背景大幅虚化成柔和的光斑，发丝边缘自然，颜色自然。去掉手机照片那种过度锐化、HDR 和涂抹感，景深、焦外和镜头的成像质感要像真的大底相机；不要加胶片颗粒。人物长相、姿势、服装和构图不变，结果仍然是一张真实的照片。"),
                 AIPreset(title: "长焦压缩", symbol: "camera", prompt: "这是一张手机拍的照片。把它处理成用全画幅相机配 200mm f/2 长焦镜头拍出来的样子：长焦的空间压缩感，背景被拉近并完全虚化，主体突出，画面干净。去掉手机照片那种过度锐化、HDR 和涂抹感，景深、焦外和镜头的成像质感要像真的大底相机；不要加胶片颗粒。人物长相、姿势、服装和构图不变，结果仍然是一张真实的照片。"),
             ]
+        case .creative:
+            return CreativeKind.all
         case .body:
             return [
                 AIPreset(title: "瘦身", symbol: "figure.stand", prompt: "让身材稍微苗条一些，比例自然，不要改变姿势、长相和背景。"),

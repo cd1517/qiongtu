@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 底部一级菜单。
 enum MainTab: String, CaseIterable, Identifiable {
-    case tools, beauty, body, hair, filter, adjust, deco, ai
+    case tools, beauty, body, hair, filter, effect, adjust, deco, ai
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum MainTab: String, CaseIterable, Identifiable {
         case .body: return "美体"
         case .hair: return "美发"
         case .filter: return "滤镜"
+        case .effect: return "特效"
         case .adjust: return "调色"
         case .deco: return "装饰"
         case .ai: return "AI 修图"
@@ -23,6 +24,7 @@ enum MainTab: String, CaseIterable, Identifiable {
     var directTool: Tool? {
         switch self {
         case .filter: return .filter
+        case .effect: return .effect
         case .adjust: return .adjust
         default: return nil
         }
@@ -67,7 +69,7 @@ enum MainTab: String, CaseIterable, Identifiable {
             return AIPresetGroup.editGroups.map {
                 MenuEntry(title: $0.menuTitle, symbol: $0.symbol, badge: "AI", action: .ai($0))
             }
-        case .filter, .adjust:
+        case .filter, .effect, .adjust:
             return []
         }
     }
@@ -452,6 +454,7 @@ struct EditorView: View {
         case .makeup: MakeupPanel(model: model)
         case .skin: SkinPanel(model: model)
         case .shape: ShapePanel(model: model)
+        case .effect: EffectPanel(model: model)
         }
     }
 

@@ -291,6 +291,7 @@ enum EditOp {
     case skin(SkinParams)
     case shape(ShapeParams)
     case instant(InstantParams)
+    case effect(EffectParams)
 
     func apply(to image: CIImage) -> CIImage {
         switch self {
@@ -330,6 +331,8 @@ enum EditOp {
             return params.apply(to: image)
         case .instant(let params):
             return params.apply(to: image)
+        case .effect(let params):
+            return params.apply(to: image)
         }
     }
 
@@ -360,7 +363,7 @@ extension EditOp {
     func reopens(with tool: Tool) -> Bool {
         switch (self, tool) {
         case (.overlay, .text), (.overlay, .sticker), (.mosaic, .mosaic), (.doodle, .doodle), (.doodle, .mark),
-             (.frame, .frame), (.backdrop, .backdrop):
+             (.frame, .frame), (.backdrop, .backdrop), (.effect, .effect):
             return true
         default:
             return false
