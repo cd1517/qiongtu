@@ -4,6 +4,7 @@ import WebKit
 /// "封神"：AI 杂志封面 / 海报。布局和修图编辑器一致：上面是画面，底部是一级菜单，菜单上方是二、三级选项。
 struct GodCoverView: View {
     let assetID: String
+    var fileURL: URL? = nil
     var onClose: () -> Void
 
     enum Tab: String, CaseIterable, Identifiable {
@@ -90,7 +91,10 @@ struct GodCoverView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
-        .task { await model.load(assetID: assetID) }
+        .task {
+            if let fileURL { await model.load(fileURL: fileURL) }
+            else { await model.load(assetID: assetID) }
+        }
         .sheet(isPresented: $showSettings) { SettingsView() }
     }
 
