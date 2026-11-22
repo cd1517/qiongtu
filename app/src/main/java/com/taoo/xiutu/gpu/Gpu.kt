@@ -95,7 +95,20 @@ void main() {
         }
     }
 
+    private val sizeRef = Regex("""\b(size|\w+_size)\b""")
+
+    /** 用到了 size / X_size 却没声明的，自动补上 uniform 声明。 */
+    private fun withSizeUniforms(frag: String): String {
+        val missing = sizeRef.findAll(frag).map { it.value }.toSet()
+            .filter { !Regex("""\b(uniform|in|out|const|float|vec2|vec3|vec4|int)\s+(highp\s+|mediump\s+)?(vec2\s+)?\Q$it\E\b""").containsMatchIn(frag) }
+        if (missing.isEmpty()) return frag
+        val decl = missing.joinToString("") { "uniform vec2 $it;\n" }
+        val m = Regex("""precision\s+\w+\s+float\s*;\s*\n""").find(frag) ?: return frag
+        return frag.substring(0, m.range.last + 1) + decl + frag.substring(m.range.last + 1)
+    }
+
     internal fun program(frag: String): Int = programs.getOrPut(frag) {
+        val frag = withSizeUniforms(frag)
         fun compile(type: Int, src: String): Int {
             val s = GLES30.glCreateShader(type)
             GLES30.glShaderSource(s, src)
@@ -171,7 +184,7 @@ class GpuScope internal constructor() {
     /**
      * 跑一遍着色器，输出到新纹理。
      * uniforms 支持 Float / Int / Boolean / FloatArray(1-4 或 9/16 当矩阵) / List<Float>。
-     * 自动提供 `vec2 size`（输出像素尺寸）；每个输入纹理 X 还会提供 `vec2 X_size`。
+     * 自动提供 `vec2 size`（输出像素尺寸）；每个输入纹理 X 还会提供 `vec2 X_size`。用到而没声明的会自动补声明。
      */
     fun pass(frag: String, inputs: Map<String, Tex>, uniforms: Map<String, Any> = emptyMap(), width: Int, height: Int): Tex {
         val out = empty(width, height)
