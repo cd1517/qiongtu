@@ -216,6 +216,11 @@ final class EditorModel {
     @ObservationIgnored private var originalUIImage: UIImage?
     @ObservationIgnored private var maskSet: MosaicMaskSet?
     @ObservationIgnored private var generation = 0
+    /// 草稿箱：这次编辑要不要自动存草稿（单独编辑图层时不存）。
+    @ObservationIgnored var draftEnabled = false
+    /// 原图文件的数据，写草稿时一起存；nil = 已经写过了或者没有。
+    @ObservationIgnored private var draftOriginal: Data?
+    @ObservationIgnored private var draftTask: Task<Void, Never>?
     @ObservationIgnored private let live = LiveRenderer()
 
     var canUndo: Bool { !undoStates.isEmpty && tool == nil }
@@ -253,6 +258,7 @@ final class EditorModel {
     }
 
     private func load(data: Data) async {
+        draftOriginal = data
         let loaded = await Task.detached(priority: .userInitiated) { () -> (CIImage, CIImage, CIImage, UIImage)? in
             guard let full = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return nil }
             guard let proxy = Renderer.shared.rasterize(full, maxDimension: 5120),
@@ -317,6 +323,59 @@ final class EditorModel {
         }
         isBusy = false
         refreshDetail()
+        saveDraft()
+    }
+
+    // MARK: 草稿箱
+
+    /// 从草稿接着编辑：原图当底，草稿里的画面作为第一步（撤销一步就回到原图）。
+    func loadDraft() async {
+        let loaded = await Task.detached(priority: .userInitiated) { DraftStore.shared.load() }.value
+        guard let loaded else {
+            errorText = "草稿读不出来了"
+            isLoading = false
+            return
+        }
+        await load(data: loaded.original)
+        guard source != nil else { return }
+        // 原图已经在草稿里，不用再写一遍。
+        draftOriginal = nil
+        recordUndo()
+        ops = [.ai(AIEdit(result: loaded.snapshot, strokes: [], reframed: true))]
+        await rebuildBase()
+    }
+
+    /// 停手一小会儿后，把当前画面（包括还没确认的 AI 结果）存进草稿箱。
+    func saveDraft() {
+        guard draftEnabled, let proxy else { return }
+        var all = ops
+        if tool == .ai, let pending = pendingOps() { all += pending }
+        guard !all.isEmpty else { return }
+        let original = draftOriginal
+        let token = DraftStore.shared.token
+        draftTask?.cancel()
+        draftTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard !Task.isCancelled else { return }
+            let wrote = await Task.detached(priority: .utility) { () -> Bool in
+                let out = EditOp.apply(all, to: proxy)
+                guard let r = Renderer.shared.rasterize(out, maxDimension: 4096) else { return false }
+                let quality = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
+                guard let data = Renderer.shared.context.heifRepresentation(
+                    of: r.ci, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, options: [quality: 0.9]) else { return false }
+                DraftStore.shared.write(original: original, snapshot: data, token: token)
+                return true
+            }.value
+            if wrote, original != nil { self?.draftOriginal = nil }
+        }
+    }
+
+    /// 正常离开编辑器：不用草稿了。
+    func discardDraft() {
+        draftTask?.cancel()
+        draftTask = nil
+        guard draftEnabled else { return }
+        DraftStore.shared.clear()
     }
 
     // MARK: 工具进出
@@ -1334,6 +1393,7 @@ final class EditorModel {
                 self.aiResultReframed = reframe != .original || recomposed
                 self.aiHasResult = true
                 self.aiRunning = false
+                self.saveDraft()
                 if started == .beauty, let key = self.pendingFaceKey, let frame = self.aiFrame, let ellipse = self.aiEllipse {
                     self.faceCache[key] = CachedFace(image: image, frame: frame, ellipse: ellipse)
                     self.cachedFaceKeys.insert(key)

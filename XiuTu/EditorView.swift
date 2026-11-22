@@ -116,6 +116,8 @@ struct EditorView: View {
     var fileURL: URL? = nil
     /// 不为空时编辑的是一个图层自己的内容（或者图层下面的照片）：从给的图和步骤开始，点"完成"把步骤交回去。
     var layerEdit: LayerEditRequest? = nil
+    /// 从草稿箱接着编辑上次没做完的图。
+    var restoreDraft = false
     let initialTool: Tool?
     var onClose: () -> Void
 
@@ -200,8 +202,11 @@ struct EditorView: View {
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .task {
+            model.draftEnabled = !embedded
             if let layerEdit {
                 await model.load(image: layerEdit.source, ops: layerEdit.ops)
+            } else if restoreDraft {
+                await model.loadDraft()
             } else if let fileURL {
                 await model.load(fileURL: fileURL)
             } else {
@@ -212,7 +217,7 @@ struct EditorView: View {
         .sheet(isPresented: $showSettings) { SettingsView() }
         .sheet(isPresented: $showSave) { SaveSheet(model: model, onSave: save) }
         .confirmationDialog("放弃当前修改？", isPresented: $confirmDiscard, titleVisibility: .visible) {
-            Button("放弃修改", role: .destructive) { onClose() }
+            Button("放弃修改", role: .destructive) { leave() }
             Button("继续编辑", role: .cancel) {}
         }
     }
@@ -224,7 +229,7 @@ struct EditorView: View {
             if model.tool == nil {
                 Button {
                     // 保存之后没再改过，就直接返回，不用再问。
-                    if (embedded ? model.hasChanges : model.hasEdits), !isSaved { confirmDiscard = true } else { onClose() }
+                    if (embedded ? model.hasChanges : model.hasEdits), !isSaved { confirmDiscard = true } else { leave() }
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 18, weight: .semibold))
@@ -466,6 +471,12 @@ struct EditorView: View {
     }
 
     // MARK: 动作
+
+    /// 正常离开编辑器：草稿用不着了。
+    private func leave() {
+        model.discardDraft()
+        onClose()
+    }
 
     private func start(_ tool: Tool) {
         model.open(tool) {

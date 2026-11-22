@@ -371,11 +371,17 @@ enum EffectDraw {
         guard let cg = Renderer.shared.context.createCGImage(small, from: small.extent, format: .RGBA8,
                                                              colorSpace: CGColorSpace(name: CGColorSpace.sRGB)) else { return nil }
         let w = cg.width, h = cg.height
+        guard w >= 3, h >= 3 else { return nil }
         var px = [UInt8](repeating: 0, count: w * h * 4)
-        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        // 画布只在这个闭包里用，指针一直有效。
+        let drawn = px.withUnsafeMutableBytes { raw -> Bool in
+            guard let ctx = CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        guard drawn else { return nil }
         func lum(_ x: Int, _ y: Int) -> Double {
             let i = (y * w + x) * 4
             return (0.3 * Double(px[i]) + 0.59 * Double(px[i + 1]) + 0.11 * Double(px[i + 2])) / 255

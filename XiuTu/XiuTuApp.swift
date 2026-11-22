@@ -23,6 +23,7 @@ enum Route: Hashable {
     case editorFile(URL)
     case history
     case favoriteFace
+    case draft
 }
 
 struct RootView: View {
@@ -76,12 +77,43 @@ struct RootView: View {
                         }
                     case .favoriteFace:
                         FavoriteFaceView { path.removeAll() }
+                    case .draft:
+                        EditorView(assetID: "", restoreDraft: true, initialTool: nil) {
+                            if !path.isEmpty { path.removeLast() }
+                        }
                     case .history:
                         HistoryView(onEdit: { url in path.append(.editorFile(url)) },
                                     onClose: { path.removeAll() })
                     }
                 }
         }
+        .onAppear(perform: checkDraft)
+        .alert("上次有一张图还没编辑完", isPresented: $askDraft) {
+            Button("接着编辑", role: .cancel) { path = [.draft] }
+            Button("不要了", role: .destructive) { DraftStore.shared.clear() }
+        } message: {
+            Text(draftMessage)
+        }
+    }
+
+    @State private var askDraft = false
+    @State private var draftMessage = ""
+    @State private var draftChecked = false
+
+    /// 启动时看看草稿箱：上次编辑到一半 App 退出了，就问要不要接着编辑。
+    private func checkDraft() {
+        guard !draftChecked else { return }
+        draftChecked = true
+        guard DraftStore.shared.exists else { return }
+        if let date = DraftStore.shared.date {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "zh_CN")
+            f.dateFormat = "M月d日 HH:mm"
+            draftMessage = "\(f.string(from: date)) 编辑到一半的图，要接着编辑吗？"
+        } else {
+            draftMessage = "要接着编辑吗？"
+        }
+        askDraft = true
     }
 }
 
