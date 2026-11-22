@@ -1,0 +1,705 @@
+{
+ "categories": [
+  {
+   "icon": "🇺🇸",
+   "title": "美国 / 西方",
+   "styles": [
+    {
+     "id": "vogue",
+     "name": "VOGUE",
+     "desc": "高级时装·女性圣经"
+    },
+    {
+     "id": "time",
+     "name": "TIME",
+     "desc": "年度人物·权威感"
+    },
+    {
+     "id": "gq",
+     "name": "GQ",
+     "desc": "男士潮流·绅士"
+    },
+    {
+     "id": "sports",
+     "name": "SPORTS",
+     "desc": "体育明星·运动"
+    },
+    {
+     "id": "rollingstone",
+     "name": "ROLLING STONE",
+     "desc": "摇滚音乐·叛逆"
+    },
+    {
+     "id": "natgeo",
+     "name": "NAT GEO",
+     "desc": "探险纪实·黄边框"
+    },
+    {
+     "id": "forbes",
+     "name": "FORBES",
+     "desc": "商业精英·成功学"
+    },
+    {
+     "id": "newyorker",
+     "name": "NEW YORKER",
+     "desc": "文艺插画·知识分子"
+    },
+    {
+     "id": "wanted",
+     "name": "WANTED",
+     "desc": "西部通缉·复古"
+    }
+   ]
+  },
+  {
+   "icon": "🎬",
+   "title": "电影海报 · 14 种类型",
+   "styles": [
+    {
+     "id": "movie_romance",
+     "name": "爱情片",
+     "desc": "温暖浪漫·黄昏"
+    },
+    {
+     "id": "movie_comedy",
+     "name": "喜剧片",
+     "desc": "欢乐明亮·夸张"
+    },
+    {
+     "id": "movie_drama",
+     "name": "剧情片",
+     "desc": "奥斯卡·正剧"
+    },
+    {
+     "id": "movie_animation",
+     "name": "动画片",
+     "desc": "迪士尼·吉卜力"
+    },
+    {
+     "id": "movie_crime",
+     "name": "犯罪片",
+     "desc": "黑色侦探·烟雾"
+    },
+    {
+     "id": "movie_horror",
+     "name": "恐怖片",
+     "desc": "阴森氛围·暗黑"
+    },
+    {
+     "id": "movie_thriller",
+     "name": "惊悚片",
+     "desc": "心理战·悬疑"
+    },
+    {
+     "id": "movie_disaster",
+     "name": "灾难片",
+     "desc": "末日·大场面"
+    },
+    {
+     "id": "movie_arthouse",
+     "name": "文艺片",
+     "desc": "A24·戛纳极简"
+    },
+    {
+     "id": "movie_documentary",
+     "name": "纪录片",
+     "desc": "National Geographic"
+    },
+    {
+     "id": "movie_action",
+     "name": "动作片",
+     "desc": "好莱坞大片·爆炸"
+    },
+    {
+     "id": "movie_scifi",
+     "name": "科幻片",
+     "desc": "赛博朋克·未来"
+    },
+    {
+     "id": "movie_wuxia",
+     "name": "武侠片",
+     "desc": "中国古装·飘逸"
+    },
+    {
+     "id": "movie_western",
+     "name": "西部片",
+     "desc": "美式牛仔·荒野"
+    }
+   ]
+  },
+  {
+   "icon": "🇯🇵",
+   "title": "日本 · 时尚生活",
+   "styles": [
+    {
+     "id": "popeye",
+     "name": "POPEYE",
+     "desc": "City Boys·文艺男青年"
+    },
+    {
+     "id": "brutus",
+     "name": "BRUTUS",
+     "desc": "文艺极简·成熟男"
+    },
+    {
+     "id": "andpremium",
+     "name": "&Premium",
+     "desc": "女性生活·奶咖系"
+    },
+    {
+     "id": "ginza",
+     "name": "GINZA",
+     "desc": "东京女孩·高级感"
+    },
+    {
+     "id": "numero",
+     "name": "Numéro TOKYO",
+     "desc": "前卫先锋·暗黑"
+    },
+    {
+     "id": "mensnonno",
+     "name": "Men's Non-no",
+     "desc": "男生街拍·潮流"
+    },
+    {
+     "id": "linnel",
+     "name": "Linnel",
+     "desc": "ナチュラル系"
+    },
+    {
+     "id": "story",
+     "name": "STORY",
+     "desc": "40代·成熟优雅"
+    },
+    {
+     "id": "sweet",
+     "name": "sweet",
+     "desc": "糖系·明星封面"
+    },
+    {
+     "id": "vivi",
+     "name": "ViVi",
+     "desc": "K-Pop·韩流"
+    },
+    {
+     "id": "voce",
+     "name": "VoCE",
+     "desc": "美妆特写"
+    },
+    {
+     "id": "nonno",
+     "name": "non・no",
+     "desc": "大学生时尚"
+    },
+    {
+     "id": "seventeen",
+     "name": "Seventeen",
+     "desc": "高中生·制服"
+    },
+    {
+     "id": "ray",
+     "name": "Ray",
+     "desc": "愛されガール"
+    },
+    {
+     "id": "armag",
+     "name": "ar",
+     "desc": "自分磨き·健康美"
+    }
+   ]
+  },
+  {
+   "icon": "🌸",
+   "title": "日本 · 小众时尚",
+   "styles": [
+    {
+     "id": "kogyaru",
+     "name": "KOGYARU",
+     "desc": "Y2K·コギャル時代"
+    },
+    {
+     "id": "happienuts",
+     "name": "Happie nuts",
+     "desc": "Tough & Sexy·派对系"
+    },
+    {
+     "id": "ranzuki",
+     "name": "Ranzuki",
+     "desc": "カワイイ無敵·亮片粉"
+    },
+    {
+     "id": "cosplaymode",
+     "name": "COSPLAY MODE",
+     "desc": "cos圣经·キャラ再現"
+    },
+    {
+     "id": "cosmake",
+     "name": "コスプレMAKE",
+     "desc": "二次元妆造·変身"
+    },
+    {
+     "id": "jkegg",
+     "name": "JKegg",
+     "desc": "Y2K GAL·成人街头风"
+    }
+   ]
+  },
+  {
+   "icon": "🎮",
+   "title": "日本 · 漫画 / 动漫 / 游戏",
+   "styles": [
+    {
+     "id": "shonenjump",
+     "name": "少年JUMP",
+     "desc": "集英社·王道少年"
+    },
+    {
+     "id": "shonenmagazine",
+     "name": "少年マガジン",
+     "desc": "講談社·蓝色阵营"
+    },
+    {
+     "id": "shonensunday",
+     "name": "少年サンデー",
+     "desc": "小学館·名侦探"
+    },
+    {
+     "id": "youngjump",
+     "name": "ヤングジャンプ",
+     "desc": "集英社·青年向"
+    },
+    {
+     "id": "famitsu",
+     "name": "ファミ通",
+     "desc": "游戏周刊·评分圣经"
+    },
+    {
+     "id": "newtype",
+     "name": "Newtype",
+     "desc": "动漫月刊·机甲宅"
+    },
+    {
+     "id": "corocoro",
+     "name": "コロコロ",
+     "desc": "小学生漫画·彩虹色"
+    },
+    {
+     "id": "ciao",
+     "name": "ちゃお",
+     "desc": "小学馆·小女生"
+    },
+    {
+     "id": "ribon",
+     "name": "りぼん",
+     "desc": "集英社·少女漫"
+    }
+   ]
+  },
+  {
+   "icon": "📷",
+   "title": "日本 · 写真 / 周刊杂志",
+   "styles": [
+    {
+     "id": "weeklyplayboy",
+     "name": "週刊プレイボーイ",
+     "desc": "便利店·写真偶像"
+    },
+    {
+     "id": "friday",
+     "name": "FRIDAY",
+     "desc": "八卦写真·狗仔风"
+    }
+   ]
+  },
+  {
+   "icon": "🎵",
+   "title": "音乐专辑封面",
+   "styles": [
+    {
+     "id": "album_kpop",
+     "name": "K-Pop 专辑",
+     "desc": "偶像组合·光面"
+    },
+    {
+     "id": "album_rock",
+     "name": "摇滚 LP",
+     "desc": "复古黑胶·迷幻"
+    },
+    {
+     "id": "album_classical",
+     "name": "古典唱片",
+     "desc": "交响乐·极简优雅"
+    },
+    {
+     "id": "album_hiphop",
+     "name": "Hip-Hop",
+     "desc": "街头·Mixtape"
+    },
+    {
+     "id": "album_indie",
+     "name": "独立民谣",
+     "desc": "indie·DIY 美学"
+    },
+    {
+     "id": "album_edm",
+     "name": "电音 EDM",
+     "desc": "霓虹·抽象"
+    }
+   ]
+  },
+  {
+   "icon": "🛍️",
+   "title": "品牌广告海报",
+   "styles": [
+    {
+     "id": "ad_streetwear",
+     "name": "潮牌 lookbook",
+     "desc": "Supreme/Off-White"
+    },
+    {
+     "id": "ad_perfume",
+     "name": "奢侈香水",
+     "desc": "Chanel/Dior 调"
+    },
+    {
+     "id": "ad_sportscar",
+     "name": "跑车广告",
+     "desc": "Ferrari/Porsche"
+    },
+    {
+     "id": "ad_luxury",
+     "name": "奢侈时装",
+     "desc": "LV/Gucci 大片"
+    },
+    {
+     "id": "ad_athletic",
+     "name": "运动品牌",
+     "desc": "Nike/Adidas 风"
+    },
+    {
+     "id": "ad_cosmetic",
+     "name": "化妆品广告",
+     "desc": "NARS/Charlotte"
+    }
+   ]
+  },
+  {
+   "icon": "📺",
+   "title": "真人秀宣传海报",
+   "styles": [
+    {
+     "id": "reality_variety",
+     "name": "综艺节目",
+     "desc": "日韩综艺·欢乐"
+    },
+    {
+     "id": "reality_audition",
+     "name": "偶像选秀",
+     "desc": "Produce 101 调"
+    },
+    {
+     "id": "reality_dating",
+     "name": "恋爱真人秀",
+     "desc": "Heart Signal 风"
+    },
+    {
+     "id": "reality_survival",
+     "name": "生存竞技",
+     "desc": "鱿鱼游戏·硬核"
+    },
+    {
+     "id": "reality_idol",
+     "name": "偶像 teaser",
+     "desc": "K-Pop 出道海报"
+    }
+   ]
+  },
+  {
+   "icon": "🗳️",
+   "title": "政治宣传海报",
+   "styles": [
+    {
+     "id": "political_presidential",
+     "name": "总统竞选",
+     "desc": "Obama HOPE 风"
+    },
+    {
+     "id": "political_revolutionary",
+     "name": "革命家",
+     "desc": "Che 古巴风"
+    },
+    {
+     "id": "political_dystopian",
+     "name": "反乌托邦",
+     "desc": "1984·V字仇杀队"
+    },
+    {
+     "id": "political_satire",
+     "name": "讽刺政治",
+     "desc": "Banksy 街头讽刺"
+    },
+    {
+     "id": "political_jpprime",
+     "name": "総理大臣",
+     "desc": "日本首相·官邸感"
+    },
+    {
+     "id": "political_jpdiet",
+     "name": "国会議員選挙",
+     "desc": "襷带·握拳·街角"
+    },
+    {
+     "id": "political_jpcity",
+     "name": "市議員選挙",
+     "desc": "亲民·地域·小区"
+    },
+    {
+     "id": "political_jpvillage",
+     "name": "村議員選挙",
+     "desc": "草根·田园·手写"
+    }
+   ]
+  },
+  {
+   "icon": "🎨",
+   "title": "艺术展览海报",
+   "styles": [
+    {
+     "id": "art_biennale",
+     "name": "威尼斯双年展",
+     "desc": "极简当代艺术"
+    },
+    {
+     "id": "art_solo",
+     "name": "艺术家个展",
+     "desc": "画廊·工作室"
+    },
+    {
+     "id": "art_photography",
+     "name": "摄影展",
+     "desc": "黑白·胶片质感"
+    },
+    {
+     "id": "art_modern",
+     "name": "现代艺术展",
+     "desc": "MoMA/Tate 风"
+    },
+    {
+     "id": "art_installation",
+     "name": "装置艺术展",
+     "desc": "草间弥生·光影"
+    }
+   ]
+  }
+ ],
+ "beauty": [
+  {
+   "id": "none",
+   "title": "关闭 · 保留原貌"
+  },
+  {
+   "id": "subtle",
+   "title": "轻度 · 自然修饰"
+  },
+  {
+   "id": "medium",
+   "title": "中度 · 杂志级精修"
+  },
+  {
+   "id": "strong",
+   "title": "强力 · 偶像级美颜"
+  }
+ ],
+ "age": [
+  {
+   "id": "original",
+   "title": "保持原年龄"
+  },
+  {
+   "id": "teens",
+   "title": "20代前半 · 22-25 岁"
+  },
+  {
+   "id": "twenties",
+   "title": "20代 · 22-28 岁"
+  },
+  {
+   "id": "thirties",
+   "title": "30代 · 30-38 岁"
+  },
+  {
+   "id": "forties",
+   "title": "40代 · 40-48 岁"
+  },
+  {
+   "id": "fifties",
+   "title": "50代 · 50-58 岁"
+  },
+  {
+   "id": "sixties",
+   "title": "60代 · 60-68 岁"
+  }
+ ],
+ "persona": [
+  {
+   "id": "random",
+   "title": "随机 · 自动适配所选杂志"
+  },
+  {
+   "id": "seiso",
+   "title": "清纯系 · 透明感淡妆"
+  },
+  {
+   "id": "kawaii",
+   "title": "可爱系 · 元气甜美"
+  },
+  {
+   "id": "gyaru",
+   "title": "辣妹ギャル · 漂染浓妆"
+  },
+  {
+   "id": "jirai",
+   "title": "黑粉暗甜 · 成人暗黑甜酷"
+  },
+  {
+   "id": "ryousan",
+   "title": "量产型 · 粉色蝴蝶结"
+  },
+  {
+   "id": "onee",
+   "title": "御姐成熟 · 知性优雅"
+  },
+  {
+   "id": "nightclub",
+   "title": "夜场派对 · 闪片浓妆"
+  },
+  {
+   "id": "queen",
+   "title": "女王风 · 强势霸气"
+  },
+  {
+   "id": "cabaret",
+   "title": "公关キャバ · 华丽晚装"
+  },
+  {
+   "id": "lolita",
+   "title": "洛丽塔 · 蕾丝公主"
+  },
+  {
+   "id": "jk",
+   "title": "学院风 · 成人预科穿搭"
+  },
+  {
+   "id": "business",
+   "title": "商业精英 · 西装领带"
+  },
+  {
+   "id": "scholar",
+   "title": "文弱书生 · 眼镜针织"
+  },
+  {
+   "id": "athlete",
+   "title": "体育明星 · 健美运动"
+  },
+  {
+   "id": "fitness",
+   "title": "健身教练 · 肌肉型男"
+  },
+  {
+   "id": "rocker",
+   "title": "摇滚青年 · 皮衣叛逆"
+  },
+  {
+   "id": "gentleman",
+   "title": "英伦绅士 · 老钱质感"
+  },
+  {
+   "id": "kpopboy",
+   "title": "韩系欧巴 · K-pop idol"
+  },
+  {
+   "id": "cityboy",
+   "title": "文艺男青年 · POPEYE 风"
+  },
+  {
+   "id": "bachelor",
+   "title": "邻家男孩 · 阳光清爽"
+  },
+  {
+   "id": "artist",
+   "title": "艺术家 · 文艺创意"
+  },
+  {
+   "id": "natural",
+   "title": "天然系 · 素颜无修"
+  },
+  {
+   "id": "half",
+   "title": "混血ハーフ · 立体五官"
+  },
+  {
+   "id": "coser",
+   "title": "Coser · 二次元角色"
+  },
+  {
+   "id": "alt",
+   "title": "暗黑亚文化 · 哥特"
+  },
+  {
+   "id": "kclean",
+   "title": "韩系 · 干净瓷肌"
+  },
+  {
+   "id": "genki",
+   "title": "元气阳光 · 笑容灿烂"
+  },
+  {
+   "id": "hkretro",
+   "title": "港风 · 90 年代复古"
+  }
+ ],
+ "gender": [
+  {
+   "id": "auto",
+   "title": "按照片自动识别"
+  },
+  {
+   "id": "male",
+   "title": "男性 · 强制男性化"
+  },
+  {
+   "id": "female",
+   "title": "女性 · 强制女性化"
+  },
+  {
+   "id": "androgynous",
+   "title": "中性 · 无性别化"
+  }
+ ],
+ "filter": [
+  {
+   "id": "none",
+   "title": "原图"
+  },
+  {
+   "id": "bw",
+   "title": "黑白"
+  },
+  {
+   "id": "vintage",
+   "title": "复古"
+  },
+  {
+   "id": "contrast",
+   "title": "高对比"
+  },
+  {
+   "id": "warm",
+   "title": "暖色"
+  },
+  {
+   "id": "cool",
+   "title": "冷色"
+  }
+ ]
+}
