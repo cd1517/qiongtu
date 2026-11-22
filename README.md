@@ -2,6 +2,8 @@
 
 自用的修图 App。iOS 版（SwiftUI + Core Image + Vision），iOS 17+；安卓版在 [`android/`](android/)（Kotlin + Jetpack Compose），Android 10+。
 
+> **使用状态**：iOS 版可以正常使用；安卓版还没有经过测试，实际效果如何不清楚，可能有问题。
+
 > ## ⚠️ 下载前必读
 >
 > **不会申请、不会配置 API Key 的，请不要下载。**
@@ -113,6 +115,8 @@ Release 里的 IPA 用作者的个人开发证书签名，只能装在作者登�
 ## 安卓版
 
 [`android/`](android/) 是原生安卓移植（Kotlin + Jetpack Compose + OpenGL ES 着色器 + ML Kit），界面、功能和 AI 指令跟 iOS 版一致。
+
+> ⚠️ **安卓版没有经过测试**，只在电脑上的模拟器里跑过，还没在真机上用过，效果如何不清楚。想稳定使用请用 iOS 版。
 
 - **安装**：在 Releases 里下载 `Qiongtu-android-*.apk`，手机上允许"安装未知应用"后打开安装。Android 10 以上、64 位手机。
 - **编译**：JDK 17 + Android SDK（需要 NDK 和 CMake，用来编 RAW 解码库 LibRaw），在 `android/` 里运行 `./gradlew assembleDebug`。
