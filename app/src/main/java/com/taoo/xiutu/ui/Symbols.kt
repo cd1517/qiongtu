@@ -2,6 +2,7 @@ package com.taoo.xiutu.ui
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Redo
@@ -329,4 +330,20 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "window.casement" to Icons.Filled.Window,
     "lightbulb.led.fill" to Icons.Filled.Highlight,
     "figure.stand.dress" to Icons.Filled.Woman,
+    // 图层、拼图
+    "wand.and.sparkles" to Icons.Filled.AutoFixHigh,
+    "person.crop.rectangle" to Icons.Filled.Portrait,
+    "square.on.square" to Icons.Filled.ContentCopy,
+    "arrow.up.square" to Icons.Filled.FlipToFront,
+    "arrow.down.square" to Icons.Filled.FlipToBack,
+    "chevron.up.chevron.down" to Icons.Filled.UnfoldMore,
+    "rectangle.split.1x2" to Icons.Filled.ViewAgenda,
+    "rectangle.split.2x1" to Icons.Filled.VerticalSplit,
+    "square.split.2x2" to Icons.Filled.GridView,
+    "app" to Icons.Filled.RoundedCorner,
+    "arrow.triangle.2.circlepath" to Icons.Filled.Autorenew,
+    "arrow.left" to Icons.AutoMirrored.Filled.ArrowBack,
+    "arrow.right" to Icons.AutoMirrored.Filled.ArrowForward,
+    "arrow.up" to Icons.Filled.ArrowUpward,
+    "arrow.down" to Icons.Filled.ArrowDownward,
 )

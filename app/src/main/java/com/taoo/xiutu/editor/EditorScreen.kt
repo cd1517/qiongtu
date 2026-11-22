@@ -92,7 +92,14 @@ fun MainTab.entries(): List<MenuEntry> {
 }
 
 @Composable
-fun EditorScreen(model: EditorModel, initialTool: Tool?, onClose: () -> Unit) {
+fun EditorScreen(
+    model: EditorModel,
+    initialTool: Tool?,
+    /** 不为空时编辑的是一个图层自己的内容（或者图层下面的照片）：点"完成"把步骤交回去，不存相册。 */
+    layerEdit: LayerEditRequest? = null,
+    onClose: () -> Unit,
+) {
+    val embedded = layerEdit != null
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var savedRevision by remember { mutableStateOf<Int?>(null) }
@@ -114,7 +121,8 @@ fun EditorScreen(model: EditorModel, initialTool: Tool?, onClose: () -> Unit) {
     DisposableEffect(Unit) { onDispose { model.dispose() } }
 
     fun tryClose() {
-        if (model.hasEdits && !isSaved) confirmDiscard = true else onClose()
+        val changed = if (embedded) model.hasChanges else model.hasEdits
+        if (changed && !isSaved) confirmDiscard = true else onClose()
     }
     BackHandler {
         when {
@@ -126,11 +134,20 @@ fun EditorScreen(model: EditorModel, initialTool: Tool?, onClose: () -> Unit) {
 
     Box(Modifier.fillMaxSize().background(Theme.bg).systemBarsPadding().imePadding()) {
         Column(Modifier.fillMaxSize()) {
-            TopBar(model, isSaved, saving, onBack = ::tryClose, onSave = { showSave = true })
+            TopBar(model, isSaved, saving, onBack = ::tryClose, onSave = { showSave = true },
+                onDone = layerEdit?.let { req -> { req.onDone(model.ops); onClose() } })
             Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(0.dp))) {
-                EditorCanvas(model, onLayers = { start(Tool.LAYERS) })
+                EditorCanvas(model, onLayers = if (embedded) null else ({ start(Tool.LAYERS) }))
+                // 单独编辑图层内容时，标出改的是哪一层
+                if (layerEdit != null) {
+                    Text(
+                        "正在编辑：${layerEdit.title}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.Black,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 6.dp).clip(CircleShape)
+                            .background(Theme.accent).padding(horizontal = 12.dp, vertical = 5.dp),
+                    )
+                }
             }
-            Bottom(model, mainTab, onTab = { mainTab = it }, onEntry = { action ->
+            Bottom(model, mainTab, embedded, onTab = { mainTab = it }, onEntry = { action ->
                 when (action) {
                     is MenuAction.OpenTool -> start(action.tool)
                     is MenuAction.OpenAI -> model.beginAI(action.group)
@@ -179,7 +196,7 @@ fun EditorScreen(model: EditorModel, initialTool: Tool?, onClose: () -> Unit) {
 interface TextStarter { fun onOpenedFromMenu() }
 
 @Composable
-private fun TopBar(model: EditorModel, isSaved: Boolean, saving: Boolean, onBack: () -> Unit, onSave: () -> Unit) {
+private fun TopBar(model: EditorModel, isSaved: Boolean, saving: Boolean, onBack: () -> Unit, onSave: () -> Unit, onDone: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (model.tool == null) {
             Box(Modifier.size(44.dp).tap(onClick = onBack), contentAlignment = Alignment.Center) {
@@ -193,6 +210,15 @@ private fun TopBar(model: EditorModel, isSaved: Boolean, saving: Boolean, onBack
                 Icon(sym("arrow.uturn.forward"), "重做", tint = Color.White)
             }
             Spacer(Modifier.weight(1f))
+            if (onDone != null) {
+                // 单独编辑图层内容：不存相册，把修改步骤交回图层
+                val enabled = !model.isLoading && !model.isBusy
+                Box(
+                    Modifier.clip(CircleShape).background(if (enabled) Theme.accent else Theme.accent.copy(alpha = 0.4f))
+                        .tap(enabled, onDone).padding(horizontal = 18.dp, vertical = 8.dp),
+                ) { Text("完成", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.Black) }
+                return@Row
+            }
             if (isSaved) {
                 Icon(sym("checkmark.circle.fill"), null, tint = Theme.green, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(3.dp))
@@ -208,7 +234,7 @@ private fun TopBar(model: EditorModel, isSaved: Boolean, saving: Boolean, onBack
 }
 
 @Composable
-private fun EditorCanvas(model: EditorModel, onLayers: () -> Unit) {
+private fun EditorCanvas(model: EditorModel, onLayers: (() -> Unit)?) {
     val s = model.session
     if (s != null && s.customCanvas) {
         s.Canvas(Modifier.fillMaxSize())
@@ -228,7 +254,7 @@ private fun EditorCanvas(model: EditorModel, onLayers: () -> Unit) {
         }
         ZoomableCanvas(model.shownImage, handlers = handlers, focus = s?.focusRect, onTap = tap)
         Column(Modifier.align(Alignment.BottomEnd)) {
-            if (s == null && ToolRegistry.available(Tool.LAYERS)) {
+            if (s == null && onLayers != null && ToolRegistry.available(Tool.LAYERS)) {
                 RoundIcon(Tool.LAYERS.symbol, Modifier.padding(end = 12.dp).padding(bottom = 0.dp)) { onLayers() }
             }
             CompareButton(model)
@@ -263,7 +289,7 @@ fun CompareButton(model: EditorModel) {
 }
 
 @Composable
-private fun Bottom(model: EditorModel, tab: MainTab, onTab: (MainTab) -> Unit, onEntry: (MenuAction) -> Unit) {
+private fun Bottom(model: EditorModel, tab: MainTab, embedded: Boolean, onTab: (MainTab) -> Unit, onEntry: (MenuAction) -> Unit) {
     val s = model.session
     if (s != null) {
         Column(Modifier.fillMaxWidth().background(Theme.panel)) {
@@ -281,13 +307,13 @@ private fun Bottom(model: EditorModel, tab: MainTab, onTab: (MainTab) -> Unit, o
             }
         }
     } else {
-        MainMenu(tab, onTab, onEntry)
+        MainMenu(tab, onTab, onEntry, embedded)
     }
 }
 
 /** 没有打开任何工具时的底部：上面是当前一级菜单的二级入口，下面是一级菜单。 */
 @Composable
-private fun MainMenu(tab: MainTab, onTab: (MainTab) -> Unit, onEntry: (MenuAction) -> Unit) {
+private fun MainMenu(tab: MainTab, onTab: (MainTab) -> Unit, onEntry: (MenuAction) -> Unit, embedded: Boolean = false) {
     val tabs = MainTab.entries.filter { it.directTool != null || it.entries().isNotEmpty() }
     Column(Modifier.fillMaxWidth().background(Theme.panel)) {
         key(tab) {
@@ -295,7 +321,9 @@ private fun MainMenu(tab: MainTab, onTab: (MainTab) -> Unit, onEntry: (MenuActio
                 Modifier.fillMaxWidth().height(92.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
-                for (e in tab.entries()) IconTile(e.symbol, e.title, badge = e.badge) { onEntry(e.action) }
+                // 单独编辑图层内容时不再提供"图层"入口
+                val list = tab.entries().filter { !(embedded && (it.action as? MenuAction.OpenTool)?.tool == Tool.LAYERS) }
+                for (e in list) IconTile(e.symbol, e.title, badge = e.badge) { onEntry(e.action) }
             }
         }
         Row(Modifier.fillMaxWidth().height(50.dp).padding(horizontal = 6.dp)) {

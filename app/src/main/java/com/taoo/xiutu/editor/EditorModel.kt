@@ -206,6 +206,14 @@ class EditorModel(val context: Context) {
     fun commitTool(next: (() -> Unit)? = null) {
         val s = session ?: run { next?.invoke(); return }
         if (s.busy) return
+        // 工具要求原地替换整串历史（图层）
+        val replacement = runCatching { s.replacementOps() }.onFailure { it.printStackTrace() }.getOrNull()
+        if (replacement != null) {
+            comparing = false
+            s.close()
+            replaceOps(replacement, next)
+            return
+        }
         val newOps = runCatching { s.commitOps() }.onFailure { it.printStackTrace() }.getOrElse { emptyList() }
         comparing = false
         val r = reopened
