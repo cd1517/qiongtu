@@ -14,6 +14,16 @@
 >
 > **看不懂上面这几条的，请直接关掉这个页面。下载即视为已读懂并同意以上全部内容。**
 
+## 截图
+
+| 主页 | 拍立得 | 拍立得 · 实物扫描 |
+|:-:|:-:|:-:|
+| <img src="docs/screenshots/01-home.png" width="240"> | <img src="docs/screenshots/02-filter.png" width="240"> | <img src="docs/screenshots/03-instant.png" width="240"> |
+| **AI 修图 · 光线** | **摄影棚 · 拍场景** | **摄影棚 · AI 生成** |
+| <img src="docs/screenshots/04-ai-light.png" width="240"> | <img src="docs/screenshots/05-studio-scene.png" width="240"> | <img src="docs/screenshots/06-studio-result.png" width="240"> |
+
+摄影棚示例里的人物是 AI 生成的虚构人物。
+
 ## 功能
 
 - 编辑：裁剪、调色、滤镜（含拍立得）、文字贴纸、涂鸦标记、马赛克、边框背景、图层、拼图
