@@ -83,7 +83,7 @@ extension EditorModel {
             "第 2 张图是最底下的原照片。",
         ]
         if baseHasPerson {
-            lines.append("【最重要】原照片里的人物是这张照片的主角：合成后人物必须完整地露出来、站在最前面，长相、发型、服装、姿势和身材比例都不变，必须还是同一个人。粗合成里如果有图层挡住了人，那是摆放的问题，不要照着挡。")
+            lines.append("【最重要】原照片里的人物是这张照片的主角：人物在画面里的位置、大小、轮廓、姿势和手的位置都和第 2 张原照片完全一样，一个像素都不要挪，也不要重画人物；长相、脸型、胖瘦、发型和服装都不变。人物只有一个，不要出现重影或多出来的手。粗合成里如果有图层挡住了人，那是摆放的问题，不要照着挡。")
         }
         for (i, layer) in layers.enumerated() {
             let n = i + 3
@@ -95,7 +95,9 @@ extension EditorModel {
                 lines.append("第 \(n) 张图是一张照片，按粗合成里的位置和大小把它的内容自然地融进画面。")
             }
         }
-        lines.append("【构图】像一位专业摄影师在现场重新取景：人物和场景里的地标（建筑、塔、山、月亮等标志性的东西）都要完整、好看地放在画面里，地标不要被画面边缘切掉顶部，上方留出适当的天空；可以调整场景在画面里的位置、远近和大小，让主次分明、画面平衡（比如三分法），但人物仍然是主角，在画面里清楚、完整。")
+        lines.append(baseHasPerson
+            ? "【构图】人物不动，只通过调整背景场景的位置、远近和大小来构图：场景里的地标（建筑、塔、山、月亮等）要完整、好看地出现在人物身后，不要被画面边缘切掉顶部，上方留出适当的天空，画面平衡。"
+            : "【构图】像一位专业摄影师在现场重新取景：主体和场景里的地标都要完整、好看地放在画面里，地标不要被画面边缘切掉顶部，上方留出适当的天空，画面平衡（比如三分法）。")
         lines.append("统一所有元素的光线方向和强弱、色温色调、反差、景深虚实、清晰度和画质；给人和物体补上符合场景的阴影、反光和与地面的接触；修掉抠图的硬边、白边和残留背景，发丝边缘自然；按场景的透视让大小比例合理。画面比例和第 1 张一致。")
         lines.append("附的原图只用来参考和保持细节，不要把它们原样拼贴进画面，也不要出现拼贴的边框。结果必须是一张真实的相机照片：清晰度和原照片一致，不要过度锐化、不要边缘白边、不要塑料感的皮肤和过高的饱和度，不要有 AI 生成感和插画感。")
         return lines.joined(separator: "\n")
@@ -119,21 +121,38 @@ extension EditorModel {
         Task { [weak self] in
             do {
                 // 底下的照片里有没有人：有人就以人为主角，整张照片的图层当背景。
-                let hasPerson = await Task.detached(priority: .userInitiated) { () -> Bool in
-                    guard let cg = baseImage?.cgImage else { return false }
-                    return !FaceDetector.detect(in: cg).isEmpty || PersonSegmenter.mask(for: cg) != nil
+                let personMask = await Task.detached(priority: .userInitiated) { () -> CGImage? in
+                    guard let cg = baseImage?.cgImage else { return nil }
+                    return PersonSegmenter.mask(for: cg)
                 }.value
+                let hasPerson: Bool
+                if personMask != nil {
+                    hasPerson = true
+                } else {
+                    hasPerson = await Task.detached(priority: .userInitiated) { () -> Bool in
+                        guard let cg = baseImage?.cgImage else { return false }
+                        return !FaceDetector.detect(in: cg).isEmpty
+                    }.value
+                }
                 let references = (baseImage.map { [$0] } ?? []) + visible.map { UIImage(cgImage: $0.content) }
                 _ = AIClient.takeLastUsage()
                 let result = try await AIRunner.run(endpoint: endpoint, prompt: Self.fusePrompt(layers: visible, baseHasPerson: hasPerson),
                                                     proxy: proxy, ops: state.prefix + [.layers(stack)], strokes: [], crop: nil,
                                                     appendGuidance: false, references: references)
                 _ = AIClient.takeLastUsage()
+                // 有人、而且图层都是整张的场景（没有要放在人前面的抠图）：把原照片里的人原样贴回去，
+                // 只借 AI 结果的光影和颜色，这样脸、胖瘦和手都是原图的，不会变也不会有重影。
+                var final = result
+                if let personMask, !visible.contains(where: { $0.cutout }) {
+                    final = await Task.detached(priority: .userInitiated) { () -> CGImage in
+                        Self.restorePerson(fused: result, base: EditOp.apply(state.prefix, to: proxy), mask: personMask) ?? result
+                    }.value
+                }
                 guard let self, self.tool == .layers else { return }
                 self.layerState.busy = false
                 self.layerState.fusing = false
                 // 历史：下面的照片 → 图层 → 融合结果 → 之后的步骤。
-                let fused = AIEdit(result: result, strokes: [])
+                let fused = AIEdit(result: final, strokes: [])
                 self.replaceOps(state.prefix + [.layers(stack), .ai(fused)] + state.suffix)
             } catch {
                 guard let self, self.tool == .layers else { return }
@@ -142,6 +161,33 @@ extension EditorModel {
                 if !(error is CancellationError) { self.layerState.note = error.localizedDescription }
             }
         }
+    }
+
+    /// 把原照片里的人贴回融合结果：人物的细节用原图，光影颜色跟着融合结果走；人物边缘往外扩一点再羽化，盖住 AI 留下的重影。
+    nonisolated static func restorePerson(fused: CGImage, base: CIImage, mask: CGImage) -> CGImage? {
+        let b = base.transformed(by: CGAffineTransform(translationX: -base.extent.minX, y: -base.extent.minY))
+        let extent = b.extent
+        // 不超过 4096，免得太占内存。
+        let k = min(1, 4096 / max(extent.width, extent.height))
+        let target = CGRect(x: 0, y: 0, width: (extent.width * k).rounded(), height: (extent.height * k).rounded())
+        let original = b.transformed(by: CGAffineTransform(scaleX: target.width / extent.width, y: target.height / extent.height))
+            .cropped(to: target)
+        var ai = CIImage(cgImage: fused)
+        ai = ai.transformed(by: CGAffineTransform(scaleX: target.width / ai.extent.width, y: target.height / ai.extent.height))
+            .cropped(to: target)
+        let person = ToneTransfer.apply(original: original, graded: ai)
+        let dim = max(target.width, target.height)
+        let m = CIImage(cgImage: mask, options: [.colorSpace: NSNull()])
+            .transformed(by: CGAffineTransform(scaleX: target.width / CGFloat(mask.width), y: target.height / CGFloat(mask.height)))
+            .clampedToExtent()
+            .applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: dim * 0.006])
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: dim * 0.004])
+            .cropped(to: target)
+        let out = person.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: ai,
+            kCIInputMaskImageKey: m,
+        ]).cropped(to: target)
+        return Renderer.shared.cgImage(out)
     }
 
     /// 重新算一遍"图层下面的照片"的预览。
