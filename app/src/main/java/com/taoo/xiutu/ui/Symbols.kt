@@ -329,4 +329,6 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "window.casement" to Icons.Filled.Window,
     "lightbulb.led.fill" to Icons.Filled.Highlight,
     "figure.stand.dress" to Icons.Filled.Woman,
+    "mouth" to Icons.Filled.Mood,
+    "heart.circle" to Icons.Filled.VolunteerActivism,
 )
