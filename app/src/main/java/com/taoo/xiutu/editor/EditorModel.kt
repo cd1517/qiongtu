@@ -98,7 +98,10 @@ class EditorModel(val context: Context) {
     private fun loadWith(initial: List<EditOp> = emptyList(), decode: () -> Bitmap?) {
         scope.launch {
             val r = withContext(Dispatchers.Default) {
-                val full = decode() ?: return@withContext null
+                var full = decode() ?: return@withContext null
+                // 原图超过这台设备 GPU 能放下的最大纹理时缩到上限，否则着色器步骤在保存时会失败
+                val maxTex = runCatching { com.taoo.xiutu.gpu.Gpu.run { com.taoo.xiutu.gpu.Gpu.maxTextureSize } }.getOrDefault(4096)
+                full = Img.downscale(full, maxTex)
                 val p = Img.downscale(full, PROXY_SIDE)
                 Triple(full, p, Img.downscale(p, PREVIEW_SIDE))
             }
