@@ -61,6 +61,7 @@ fun MainTab.entries(): List<MenuEntry> {
             MenuEntry(Tool.COLLAGE), MenuEntry(Tool.LAYERS),
         )
         MainTab.BEAUTY -> listOf(
+            MenuEntry("满意脸型", "star.fill", "AI", MenuAction.ToolMode(Tool.BEAUTY, "favorite")),
             MenuEntry("一键美颜", "sparkles", "AI", MenuAction.ToolMode(Tool.BEAUTY, "ai")),
             MenuEntry(Tool.RESHAPE), MenuEntry(Tool.MAKEUP), MenuEntry(Tool.SKIN),
             MenuEntry("手动美颜", "slider.horizontal.3", null, MenuAction.ToolMode(Tool.BEAUTY, "manual")),
@@ -135,7 +136,13 @@ fun EditorScreen(model: EditorModel, initialTool: Tool?, onClose: () -> Unit) {
                     is MenuAction.OpenTool -> start(action.tool)
                     is MenuAction.OpenAI -> model.beginAI(action.group)
                     MenuAction.Erase -> model.beginAI(AIPresetGroup.REMOVE, AIPresetGroup.REMOVE.presets.first().prompt)
-                    is MenuAction.ToolMode -> model.open(action.tool) { s -> (s as? ModeSelectable)?.selectMode(action.mode) }
+                    is MenuAction.ToolMode ->
+                        // 进美颜后直接按满意脸型修：还没有满意脸型就不进
+                        if (action.mode == "favorite" && com.taoo.xiutu.tools.beauty.FavoriteFaceStore.current == null) {
+                            model.showToast("还没有满意脸型")
+                        } else {
+                            model.open(action.tool) { s -> (s as? ModeSelectable)?.selectMode(action.mode) }
+                        }
                 }
             })
         }

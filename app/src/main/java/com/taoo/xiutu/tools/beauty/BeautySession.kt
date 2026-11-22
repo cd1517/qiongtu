@@ -134,8 +134,15 @@ class BeautySession(model: EditorModel) : ToolSession(model, Tool.BEAUTY), ModeS
     override val busy: Boolean get() = running
     override val wantsTap: Boolean get() = true
 
+    /** 一进美颜就按满意脸型修（菜单"满意脸型"入口用）：等找完脸再开始。 */
+    private var runFavoriteAfterDetect = false
+
     override fun selectMode(mode: String) {
         this.mode = if (mode == "manual") Mode.MANUAL else Mode.AI
+        if (mode == "favorite") {
+            if (detectingFaces) runFavoriteAfterDetect = true
+            else if (faces.isNotEmpty()) runFavoriteFace()
+        }
     }
 
     override fun start() {
@@ -166,6 +173,10 @@ class BeautySession(model: EditorModel) : ToolSession(model, Tool.BEAUTY), ModeS
             faceIndex = 0
             detectingFaces = false
             updateFocus()
+            if (runFavoriteAfterDetect) {
+                runFavoriteAfterDetect = false
+                if (found.isNotEmpty()) runFavoriteFace()
+            }
         }
     }
 
@@ -318,7 +329,18 @@ class BeautySession(model: EditorModel) : ToolSession(model, Tool.BEAUTY), ModeS
      * AI 美颜：只把选中的那张脸裁出来发给服务商，结果只贴回脸部的椭圆范围。
      * 这张脸的这个风格之前生成过的话直接用记住的结果；force = true 时强制重新生成。
      */
-    fun runFaceAI(style: BeautyStyle, force: Boolean = false) {
+    /** 按满意脸型修当前这张脸。 */
+    fun runFavoriteFace(force: Boolean = false) {
+        val face = FavoriteFaceStore.current
+        val reference = face?.let { FavoriteFaceStore.image(it) }
+        if (reference == null) {
+            error = "还没有满意脸型"
+            return
+        }
+        runFaceAI(BeautyStyle.favorite, force, listOf(reference))
+    }
+
+    fun runFaceAI(style: BeautyStyle, force: Boolean = false, references: List<Bitmap> = emptyList()) {
         if (closed || running || faceIndex !in faces.indices) return
         val key = faceKey(style)
         val cached = faceCache[key]
@@ -347,11 +369,12 @@ class BeautySession(model: EditorModel) : ToolSession(model, Tool.BEAUTY), ModeS
         frame = crop
         ellipse = ell
         pendingFaceKey = key
-        launchAI(BeautyStyle.preamble + " " + style.prompt, crop)
+        launchAI(BeautyStyle.preamble + " " + style.prompt, crop, references)
     }
 
     /** 对当前显示的这个风格重新生成一次（会再调用一次接口）。 */
     fun regenerateFaceAI() {
+        if (beautyStyle == BeautyStyle.favorite.id) return runFavoriteFace(force = true)
         val style = BeautyStyle.all.firstOrNull { it.id == beautyStyle } ?: return
         runFaceAI(style, force = true)
     }
@@ -374,7 +397,7 @@ class BeautySession(model: EditorModel) : ToolSession(model, Tool.BEAUTY), ModeS
     }
 
     /** 必须还是同一个人：画质设成"自动"时改用高画质，并要求尽量忠实于原图。 */
-    private fun launchAI(prompt: String, crop: RectF) {
+    private fun launchAI(prompt: String, crop: RectF, references: List<Bitmap> = emptyList()) {
         if (closed) return
         val proxy = model.proxy ?: return
         var endpoint = AISettings.endpoint() ?: run {
@@ -397,7 +420,7 @@ class BeautySession(model: EditorModel) : ToolSession(model, Tool.BEAUTY), ModeS
         val gen = ++generation
         job = model.scope.launch {
             try {
-                val image = AIRunner.run(endpoint, prompt, proxy, ops, emptyList(), crop, appendGuidance = false)
+                val image = AIRunner.run(endpoint, prompt, proxy, ops, emptyList(), crop, appendGuidance = false, references = references)
                 // 用量 AIClient 已经记过了，这里只取来显示
                 val usage = AIClient.takeLastUsage()
                 if (closed || gen != generation) return@launch
@@ -502,6 +525,13 @@ class BeautySession(model: EditorModel) : ToolSession(model, Tool.BEAUTY), ModeS
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Chip("原图", !hasResult) { discardFaceAI() }
+                    if (FavoriteFaceStore.current != null) {
+                        val fav = BeautyStyle.favorite
+                        Chip(
+                            if (isFaceStyleCached(fav)) "${fav.title} ✓" else fav.title,
+                            beautyStyle == fav.id && hasResult, symbol = "star.fill", badge = "AI",
+                        ) { runFavoriteFace() }
+                    }
                     for (style in BeautyStyle.all) {
                         Chip(
                             if (isFaceStyleCached(style)) "${style.title} ✓" else style.title,

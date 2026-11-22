@@ -19,6 +19,7 @@ import com.taoo.xiutu.ai.AISettings
 import com.taoo.xiutu.editor.Tool
 import com.taoo.xiutu.history.HistoryStore
 import com.taoo.xiutu.settings.SettingsSheet
+import com.taoo.xiutu.tools.beauty.FavoriteFaceStore
 import com.taoo.xiutu.ui.*
 
 /** 主页：一个大的"开始编辑"，加几个直达某个工具的快捷入口。 */
@@ -30,6 +31,7 @@ fun HomeScreen(
     startManga: () -> Unit,
     startHistory: () -> Unit,
     startRaw: () -> Unit,
+    startFavorite: () -> Unit = {},
 ) {
     var showSettings by remember { mutableStateOf(false) }
     val shortcuts = listOf(Tool.CROP, Tool.FILTER, Tool.ADJUST, Tool.MOSAIC)
@@ -64,6 +66,7 @@ fun HomeScreen(
                 FeatureButton("camera.aperture", "摄影棚", action = startStudio)
                 FeatureButton("book.pages.fill", "漫画人生", action = startManga)
                 FeatureButton(if (HistoryStore.hasPassword) "lock.fill" else "photo.stack", "历史图库", value = "${HistoryStore.count} 张", action = startHistory)
+                FeatureButton("star.fill", "满意脸型", value = "${FavoriteFaceStore.faces.size} 个", action = startFavorite)
             }
             Spacer(Modifier.weight(1f))
             Row(

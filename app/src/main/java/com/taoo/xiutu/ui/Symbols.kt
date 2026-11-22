@@ -366,4 +366,5 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "rectangle.center.inset.filled" to Icons.Filled.VerticalAlignCenter,
     "rectangle.tophalf.inset.filled" to Icons.Filled.VerticalAlignTop,
     "sunglasses" to Icons.Filled.DarkMode,
+    "star" to Icons.Outlined.StarOutline,
 )
