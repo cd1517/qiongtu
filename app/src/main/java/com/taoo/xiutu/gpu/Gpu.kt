@@ -181,13 +181,11 @@ class GpuScope internal constructor() {
         return Tex(id, b.width, b.height)
     }
 
-<<<<<<< HEAD
     /** 提前释放这次 run 里创建的一张纹理（长链条逐层叠加时省显存）。之后不能再用它。 */
     fun release(tex: Tex) {
         if (textures.remove(tex.id)) GLES30.glDeleteTextures(1, intArrayOf(tex.id), 0)
     }
 
-=======
     /** 新建一张空的半精度浮点纹理（RGBA16F，可超过 1、可为负）。设备不支持渲染到浮点纹理时退回 RGBA8。 */
     fun emptyFloat(width: Int, height: Int): Tex {
         if (!Gpu.floatRenderable) return empty(width, height)
@@ -225,7 +223,6 @@ class GpuScope internal constructor() {
     fun passFloat(frag: String, inputs: Map<String, Tex>, uniforms: Map<String, Any> = emptyMap(), width: Int, height: Int): Tex =
         pass(frag, inputs, uniforms, width, height, float = true)
 
->>>>>>> p2-raw
     /** 新建一张空纹理（RGBA8）。 */
     fun empty(width: Int, height: Int): Tex {
         val id = newTexture(width, height)
