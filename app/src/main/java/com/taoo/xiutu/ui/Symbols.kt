@@ -7,6 +7,7 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -212,4 +213,21 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "exclamationmark.triangle" to Icons.Outlined.Warning,
     "person.3.sequence" to Icons.Outlined.Groups,
     "person.3.sequence.fill" to Icons.Filled.Groups,
+    // AI 修图
+    "arrow.right.and.line.vertical.and.arrow.left" to Icons.Filled.Compress,
+    "arrow.up.circle" to Icons.Filled.ArrowCircleUp,
+    "aspectratio" to Icons.Filled.AspectRatio,
+    "cloud" to Icons.Outlined.Cloud,
+    "cloud.sun" to Icons.Filled.WbCloudy,
+    "dot.viewfinder" to Icons.Filled.ControlCamera,
+    "figure.walk" to Icons.AutoMirrored.Filled.DirectionsWalk,
+    "hand.raised.slash" to Icons.Filled.DoNotTouch,
+    "leaf" to Icons.Filled.Eco,
+    "level" to Icons.Filled.Straighten,
+    "person.crop.circle" to Icons.Filled.AccountCircle,
+    "person.slash" to Icons.Filled.PersonOff,
+    "plus.circle" to Icons.Filled.AddCircleOutline,
+    "square.and.pencil" to Icons.Filled.EditNote,
+    "squareshape.split.3x3" to Icons.Filled.Grid3x3,
+    "wind" to Icons.Filled.Air,
 )
