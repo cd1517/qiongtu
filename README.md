@@ -1,6 +1,6 @@
 # 穷图
 
-自用的 iOS 修图 App（SwiftUI + Core Image + Vision），iOS 17+。
+自用的修图 App。iOS 版（SwiftUI + Core Image + Vision），iOS 17+；安卓版在 [`android/`](android/)（Kotlin + Jetpack Compose），Android 10+。
 
 > ## ⚠️ 下载前必读
 >
@@ -109,3 +109,12 @@
 用 Xcode 打开 `XiuTu.xcodeproj`，scheme `XiuTu`，换成你自己的开发者团队后编译。
 
 Release 里的 IPA 用作者的个人开发证书签名，只能装在作者登记过的设备上；你需要用自己的证书重新签名，或者自己从源码编译。
+
+## 安卓版
+
+[`android/`](android/) 是原生安卓移植（Kotlin + Jetpack Compose + OpenGL ES 着色器 + ML Kit），界面、功能和 AI 指令跟 iOS 版一致。
+
+- **安装**：在 Releases 里下载 `Qiongtu-android-*.apk`，手机上允许"安装未知应用"后打开安装。Android 10 以上、64 位手机。
+- **编译**：JDK 17 + Android SDK（需要 NDK 和 CMake，用来编 RAW 解码库 LibRaw），在 `android/` 里运行 `./gradlew assembleDebug`。
+- **和 iOS 版的差别**：人像识别用 ML Kit，抠图只认人；RAW 冲洗用 LibRaw 解码，默认观感和 iOS 不完全一样。
+- Release 里的 APK 是调试签名的测试版。
