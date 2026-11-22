@@ -1,0 +1,373 @@
+package com.taoo.xiutu.tools.overlay
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.text.Layout as TextLayout
+import android.text.StaticLayout
+import android.text.TextPaint
+import com.taoo.xiutu.ml.Mask8
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sin
+
+/**
+ * 文字 / 贴纸的实际绘制：Canvas + StaticLayout，可以在后台线程跑。
+ * 坐标系是安卓的：原点左上角，y 向下。
+ */
+object OverlayDrawing {
+    /** 排好版、还没画的一项。 */
+    class Layout(
+        val item: OverlayItem,
+        val fontSize: Float,
+        /** 位图大小（像素）。 */
+        val width: Int,
+        val height: Int,
+        /** 文字排版框 / 图片所在的位置。 */
+        val content: RectF,
+        val text: StaticLayout?,
+        val paint: TextPaint?,
+        val fakeBold: Boolean,
+        val boxPath: Path?,
+    )
+
+    // MARK: 各种效果的实际大小（都按字号折算）
+
+    private fun strokeLine(item: OverlayItem, fs: Float) = if (item.strokeOn) fs * 0.3f * item.strokeWidth.coerceIn(0f, 1f) else 0f
+
+    /** 阴影偏移。90° 是向下。 */
+    private fun shadowOffset(item: OverlayItem, fs: Float, unit: Float = 0.5f): Pair<Float, Float> {
+        val d = fs * unit * item.shadowDistance.coerceIn(0f, 1f)
+        val a = Math.toRadians(item.shadowAngle.toDouble())
+        return (d * cos(a)).toFloat() to (d * sin(a)).toFloat()
+    }
+
+    private fun shadowBlur(item: OverlayItem, fs: Float, unit: Float = 0.35f) = fs * unit * item.shadowBlur.coerceIn(0f, 1f)
+
+    private fun glowBlur(item: OverlayItem, fs: Float) = fs * (0.08f + 0.42f * item.glowSize.coerceIn(0f, 1f))
+
+    // MARK: 排版
+
+    fun layout(item: OverlayItem, fs: Float): Layout? {
+        if (fs < 1f) return null
+        item.image?.let { return imageLayout(item, it.bitmap, fs) }
+        if (item.text.isEmpty()) return null
+
+        var fakeBold = false
+        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
+        paint.textSize = fs
+        if (item.isSticker) {
+            paint.typeface = OverlayFonts.resolve(OverlayItem.DEFAULT_FONT_ID).typeface
+        } else {
+            val r = OverlayFonts.resolve(item.fontID)
+            var weight = r.weight
+            if (item.bold) {
+                // 字体本身已经很粗：用描一圈同色的边来再加粗
+                if (weight >= 700) fakeBold = true else weight = 700
+            }
+            paint.typeface = if (weight != r.weight || item.italic) Typeface.create(r.typeface, weight, item.italic) else r.typeface
+            if (item.letterSpacing != 0f) paint.letterSpacing = item.letterSpacing.coerceIn(-0.2f, 2f)
+        }
+        val spacing = if (item.isSticker) 0f else fs * item.lineSpacing.coerceIn(-0.3f, 2f)
+        val align = when {
+            item.isSticker -> TextLayout.Alignment.ALIGN_CENTER
+            item.align == OverlayAlign.LEFT -> TextLayout.Alignment.ALIGN_NORMAL
+            item.align == OverlayAlign.RIGHT -> TextLayout.Alignment.ALIGN_OPPOSITE
+            else -> TextLayout.Alignment.ALIGN_CENTER
+        }
+        val fitW = ceil(TextLayout.getDesiredWidth(item.text, paint)).toInt() + 2
+        val static = StaticLayout.Builder.obtain(item.text, 0, item.text.length, paint, max(1, fitW))
+            .setAlignment(align)
+            .setLineSpacing(spacing, 1f)
+            .setIncludePad(false)
+            .build()
+        val text = RectF(0f, 0f, fitW.toFloat(), static.height.toFloat() + 2f)
+
+        var box: Path? = null
+        var anchor = RectF(text)
+        // 字形可能比排版框大一圈（斜体、花体的笔画），四周至少留这么多。
+        var margin = fs * (if (item.isSticker) 0.06f else 0.25f)
+        if (!item.isSticker) {
+            val line = strokeLine(item, fs) / 2 + (if (fakeBold) fs * 0.03f else 0f)
+            margin = max(margin, line + fs * 0.06f)
+            if (item.glowOn) margin = max(margin, glowBlur(item, fs) * 1.7f + line)
+            if (item.shadowOn) {
+                val (ox, oy) = shadowOffset(item, fs)
+                margin = max(margin, max(abs(ox), abs(oy)) + shadowBlur(item, fs) * 1.7f + line)
+            }
+            if (item.boxOn) {
+                val lines = lineRects(static, paint, text)
+                val p = boxShape(item, text, lines, fs)
+                box = p
+                val b = RectF()
+                @Suppress("DEPRECATION") p.computeBounds(b, true)
+                anchor = b
+            }
+        }
+        val union = RectF(text.left - margin, text.top - margin, text.right + margin, text.bottom + margin)
+        if (box != null) union.union(RectF(anchor.left - 1, anchor.top - 1, anchor.right + 1, anchor.bottom + 1))
+        // 以"底色形状（没有就是文字）"的中心为中心，上下左右对称地留边：调阴影、发光时字的位置不会跳。
+        val cx = anchor.centerX()
+        val cy = anchor.centerY()
+        val halfW = ceil(max(cx - union.left, union.right - cx))
+        val halfH = ceil(max(cy - union.top, union.bottom - cy))
+        val dx = halfW - cx
+        val dy = halfH - cy
+        box?.offset(dx, dy)
+        text.offset(dx, dy)
+        return Layout(item, fs, (halfW * 2).toInt(), (halfH * 2).toInt(), text, static, paint, fakeBold, box)
+    }
+
+    private fun imageLayout(item: OverlayItem, image: Bitmap, width: Float): Layout? {
+        if (image.width <= 0 || image.height <= 0) return null
+        val w = max(1f, width.roundToInt().toFloat())
+        val h = max(1f, (w * image.height / image.width).roundToInt().toFloat())
+        var margin = 1f
+        val line = if (item.strokeOn) imageOutline(item, w) else 0f
+        margin += line * 1.3f
+        if (item.shadowOn) {
+            val (ox, oy) = shadowOffset(item, w, 0.12f)
+            margin = max(margin, max(abs(ox), abs(oy)) + shadowBlur(item, w, 0.08f) * 1.7f + line * 1.3f + 1f)
+        }
+        margin = ceil(margin)
+        return Layout(
+            item, w, (w + margin * 2).toInt(), (h + margin * 2).toInt(),
+            RectF(margin, margin, margin + w, margin + h), null, null, false, null,
+        )
+    }
+
+    /** 图片贴纸的白边宽度（像素）。 */
+    private fun imageOutline(item: OverlayItem, width: Float) = width * 0.06f * item.strokeWidth.coerceIn(0.05f, 1f)
+
+    /** 每一行文字占的位置（荧光笔底色按行画）。 */
+    private fun lineRects(layout: StaticLayout, paint: TextPaint, rect: RectF): List<RectF> {
+        val fm = paint.fontMetrics
+        val out = ArrayList<RectF>()
+        for (i in 0 until layout.lineCount) {
+            val w = layout.getLineMax(i)
+            if (w <= 0.5f) continue
+            val left = rect.left + layout.getLineLeft(i)
+            val base = rect.top + layout.getLineBaseline(i)
+            out += RectF(left, base + fm.ascent, left + w, base + fm.descent)
+        }
+        return out
+    }
+
+    // MARK: 底色形状
+
+    private fun boxShape(item: OverlayItem, t: RectF, lines: List<RectF>, fs: Float): Path {
+        val pad = fs * (0.06f + 0.5f * item.boxPadding.coerceIn(0f, 1f))
+        val px = pad
+        val py = pad * 0.55f
+        val body = RectF(t.left - px, t.top - py, t.right + px, t.bottom + py)
+        val path = Path()
+        when (item.boxShape) {
+            OverlayShape.RECT -> path.addRect(body, Path.Direction.CW)
+            OverlayShape.ROUNDED -> {
+                val r = minOf(fs * 0.28f, body.height() / 2, body.width() / 2)
+                path.addRoundRect(body, r, r, Path.Direction.CW)
+            }
+            OverlayShape.CAPSULE -> {
+                val e = body.height() * 0.18f
+                val b = RectF(body.left - e, body.top, body.right + e, body.bottom)
+                val r = min(b.height(), b.width()) / 2
+                path.addRoundRect(b, r, r, Path.Direction.CW)
+            }
+            OverlayShape.ELLIPSE -> {
+                val a = (t.width() / 2 + px * 0.4f) * 1.36f
+                val b = (t.height() / 2 + py * 0.6f) * 1.42f
+                path.addOval(RectF(t.centerX() - a, t.centerY() - b, t.centerX() + a, t.centerY() + b), Path.Direction.CW)
+            }
+            OverlayShape.BUBBLE -> {
+                val r = minOf(fs * 0.34f, body.height() / 2, body.width() / 2)
+                path.addRoundRect(body, r, r, Path.Direction.CW)
+                // 左下角的小尾巴
+                val x0 = body.left + min(r + fs * 0.1f, body.width() * 0.3f)
+                val w = min(fs * 0.5f, body.width() * 0.35f)
+                path.moveTo(x0, body.bottom - 1)
+                path.lineTo(x0 + w, body.bottom - 1)
+                path.lineTo(x0 - fs * 0.08f, body.bottom + fs * 0.42f)
+                path.close()
+            }
+            OverlayShape.SLANT -> {
+                val s = body.height() * 0.3f
+                val l = body.left - s / 2
+                val r = body.right + s / 2
+                path.moveTo(l - s / 2, body.bottom)
+                path.lineTo(r - s / 2, body.bottom)
+                path.lineTo(r + s / 2, body.top)
+                path.lineTo(l + s / 2, body.top)
+                path.close()
+            }
+            OverlayShape.TAG -> {
+                val d = body.height() * 0.5f
+                val r = min(fs * 0.16f, body.height() / 2)
+                path.moveTo(body.left - d, body.centerY())
+                path.lineTo(body.left, body.top)
+                path.lineTo(body.right - r, body.top)
+                path.arcTo(RectF(body.right - 2 * r, body.top, body.right, body.top + 2 * r), -90f, 90f)
+                path.lineTo(body.right, body.bottom - r)
+                path.arcTo(RectF(body.right - 2 * r, body.bottom - 2 * r, body.right, body.bottom), 0f, 90f)
+                path.lineTo(body.left, body.bottom)
+                path.close()
+                // 穿绳子的小孔
+                val hole = body.height() * 0.09f
+                val hx = body.left - d * 0.38f
+                path.addOval(RectF(hx - hole, body.centerY() - hole, hx + hole, body.centerY() + hole), Path.Direction.CW)
+                path.fillType = Path.FillType.EVEN_ODD
+            }
+            OverlayShape.RIBBON -> {
+                val d = body.height() * 0.34f
+                val l = body.left - d * 1.3f
+                val rr = body.right + d * 1.3f
+                path.moveTo(l, body.top)
+                path.lineTo(rr, body.top)
+                path.lineTo(rr - d, body.centerY())
+                path.lineTo(rr, body.bottom)
+                path.lineTo(l, body.bottom)
+                path.lineTo(l + d, body.centerY())
+                path.close()
+            }
+            OverlayShape.MARKER -> {
+                // 每一行下半截画一道，像荧光笔划过
+                val grow = item.boxPadding.coerceIn(0f, 1f)
+                val rects = lines.ifEmpty { listOf(t) }
+                for (line in rects) {
+                    val h = line.height() * (0.34f + 0.3f * grow)
+                    val bottom = line.bottom - line.height() * 0.06f
+                    val bar = RectF(line.left - fs * 0.14f, bottom - h, line.right + fs * 0.14f, bottom)
+                    val r = min(h * 0.28f, bar.width() / 2)
+                    path.addRoundRect(bar, r, r, Path.Direction.CW)
+                }
+            }
+        }
+        return path
+    }
+
+    // MARK: 画
+
+    fun draw(layout: Layout): Bitmap? {
+        val w = layout.width
+        val h = layout.height
+        if (w < 1 || h < 1) return null
+        val out = runCatching { Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) }.getOrNull() ?: return null
+        val canvas = Canvas(out)
+        val item = layout.item
+        val opacity = item.opacity.coerceIn(0f, 1f)
+        if (opacity < 1f) canvas.saveLayerAlpha(null, (opacity * 255).roundToInt())
+        if (item.image != null) drawImage(item.image.bitmap, layout, canvas) else drawText(layout, canvas)
+        if (opacity < 1f) canvas.restore()
+        return out
+    }
+
+    private fun drawText(layout: Layout, canvas: Canvas) {
+        val static = layout.text ?: return
+        val paint = layout.paint ?: return
+        val item = layout.item
+        val fs = layout.fontSize
+        val styled = !item.isSticker
+        val line = if (styled) strokeLine(item, fs) else 0f
+        val bold = if (layout.fakeBold) fs * 0.045f else 0f
+
+        /** 把字画一遍：先描边（如果有），再填充。 */
+        fun glyphs(c: Canvas, fill: Int, stroke: Int) {
+            c.save()
+            c.translate(layout.content.left, layout.content.top)
+            paint.strokeJoin = Paint.Join.ROUND
+            paint.strokeCap = Paint.Cap.ROUND
+            if (line > 0f) {
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = line + bold
+                paint.color = stroke
+                static.draw(c)
+            }
+            if (bold > 0f) {
+                paint.style = Paint.Style.FILL_AND_STROKE
+                paint.strokeWidth = bold
+            } else {
+                paint.style = Paint.Style.FILL
+            }
+            paint.color = fill
+            static.draw(c)
+            c.restore()
+        }
+
+        if (styled && item.boxOn && layout.boxPath != null) {
+            val p = Paint(Paint.ANTI_ALIAS_FLAG)
+            p.color = item.boxColor.argb(item.boxOpacity)
+            canvas.drawPath(layout.boxPath, p)
+        }
+
+        if (styled && (item.shadowOn || item.glowOn)) {
+            // 先得到"字（连描边）盖住了哪些地方"，阴影和发光都从它模糊出来
+            val white = 0xFFFFFFFF.toInt()
+            val coverage = coverage(layout.width, layout.height) { glyphs(it, white, white) }
+            if (item.shadowOn) {
+                val soft = Mask8.softened(coverage, shadowBlur(item, fs))
+                val (ox, oy) = shadowOffset(item, fs)
+                fill(soft, canvas, RectF(ox, oy, layout.width + ox, layout.height + oy), item.shadowColor.argb(item.shadowOpacity))
+            }
+            if (item.glowOn) {
+                val soft = Mask8.softened(coverage, glowBlur(item, fs))
+                val gain = 1.2f + 4.5f * item.glowStrength.coerceIn(0f, 1f)
+                Mask8.remap(soft) { (it * gain).toInt() }
+                fill(soft, canvas, RectF(0f, 0f, layout.width.toFloat(), layout.height.toFloat()), item.glowColor.argb())
+            }
+        }
+
+        glyphs(canvas, if (item.isSticker) 0xFFFFFFFF.toInt() else item.color.argb(), item.strokeColor.argb())
+    }
+
+    private fun drawImage(image: Bitmap, layout: Layout, canvas: Canvas) {
+        val item = layout.item
+        val w = layout.width
+        val h = layout.height
+        val width = layout.fontSize
+        val whole = RectF(0f, 0f, w.toFloat(), h.toFloat())
+        val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        if (item.strokeOn || item.shadowOn) {
+            // 图片的不透明范围
+            var coverage = coverage(w, h) { it.drawBitmap(image, null, layout.content, bmpPaint) }
+            if (item.strokeOn) {
+                // 往外扩一圈：模糊之后取一个很低的阈值，边缘是圆润的。
+                // 模糊可以在缩小的图上做，但取阈值要回到原大小再做，边缘才清楚。
+                val line = imageOutline(item, width)
+                val soft = Mask8.softened(coverage, line * 1.2f)
+                coverage = Mask8.resized(soft, w, h).let { if (it === soft) it.copy() else it }
+                Mask8.remap(coverage) { (it - 12) * 18 }
+            }
+            if (item.shadowOn) {
+                val soft = Mask8.softened(coverage, shadowBlur(item, width, 0.08f))
+                val (ox, oy) = shadowOffset(item, width, 0.12f)
+                fill(soft, canvas, RectF(ox, oy, w + ox, h + oy), item.shadowColor.argb(item.shadowOpacity))
+            }
+            if (item.strokeOn) fill(coverage, canvas, whole, item.strokeColor.argb())
+        }
+        canvas.drawBitmap(image, null, layout.content, bmpPaint)
+    }
+
+    /** 画一遍，取出"哪些地方被盖住了"（0...255）。 */
+    private fun coverage(w: Int, h: Int, draw: (Canvas) -> Unit): Mask8 {
+        val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        draw(Canvas(b))
+        val m = Mask8.alphaOf(b)
+        b.recycle()
+        return m
+    }
+
+    /** 把覆盖图当蒙版，用指定颜色填到画布里（蒙版会拉伸到 rect 大小）。 */
+    private fun fill(mask: Mask8, canvas: Canvas, rect: RectF, color: Int) {
+        val a = mask.toAlphaBitmap()
+        val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        p.color = color
+        canvas.drawBitmap(a, null, rect, p)
+        a.recycle()
+    }
+}
