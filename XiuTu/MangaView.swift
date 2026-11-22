@@ -132,6 +132,8 @@ struct MangaView: View {
 
     @State private var model = MangaModel()
     @State private var tab: Tab = .material
+    /// 走到过的最远一步：之前的步骤随时能点回去改，后面的要一步步走过去。
+    @State private var reached: Tab = .material
     @State private var picked: [PhotosPickerItem] = []
     @State private var editingNote = false
     @State private var viewing: UIImage?
@@ -148,8 +150,9 @@ struct MangaView: View {
             VStack(spacing: 0) {
                 topBar.frame(height: 52)
                 content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                stepBar
                 panel
-                BottomTabBar(tabs: Tab.allCases, title: { $0.title }, selection: $tab)
+                stepFooter
             }
             .ignoresSafeArea(.keyboard)
             if let toast {
@@ -265,7 +268,7 @@ struct MangaView: View {
                 Image(systemName: "book.pages")
                     .font(.system(size: 44))
                     .foregroundStyle(Theme.dim)
-                Text("添加 1 到 8 张生活照片，\n把它们画成一页漫画。")
+                Text("添加 1–8 张照片")
                     .font(.system(size: 14))
                     .foregroundStyle(Theme.dim)
                     .multilineTextAlignment(.center)
@@ -285,6 +288,104 @@ struct MangaView: View {
                 .padding(.vertical, 8)
             }
         }
+    }
+
+    // MARK: 步骤
+
+    private var steps: [Tab] { Tab.allCases }
+    private func index(_ t: Tab) -> Int { steps.firstIndex(of: t) ?? 0 }
+
+    /// 这一步能不能往下走。
+    private var canAdvance: Bool {
+        switch tab {
+        case .material: return !model.photos.isEmpty
+        default: return true
+        }
+    }
+
+    private func go(_ t: Tab) {
+        withAnimation(.easeOut(duration: 0.15)) {
+            tab = t
+            if index(t) > index(reached) { reached = t }
+        }
+    }
+
+    /// 顶部的步骤条：走过的步骤可以点回去，没走到的点不了。
+    private var stepBar: some View {
+        HStack(spacing: 0) {
+            ForEach(steps) { step in
+                let i = index(step)
+                let current = step == tab
+                let done = i < index(reached) || (i <= index(reached) && !current)
+                let open = i <= index(reached)
+                Button { if open { go(step) } } label: {
+                    HStack(spacing: 5) {
+                        ZStack {
+                            Circle()
+                                .fill(current ? Theme.accent : (open ? Color.white.opacity(0.16) : Color.clear))
+                                .overlay(Circle().stroke(open ? Color.clear : Color.white.opacity(0.25), lineWidth: 1))
+                            if done && !current {
+                                Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.accent)
+                            } else {
+                                Text("\(i + 1)").font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(current ? Color.black : (open ? Color.white : Theme.dim))
+                            }
+                        }
+                        .frame(width: 20, height: 20)
+                        Text(step.title)
+                            .font(.system(size: 13, weight: current ? .bold : .regular))
+                            .foregroundStyle(current ? Color.white : (open ? Color.white.opacity(0.8) : Theme.dim))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!open || model.running)
+                if step != steps.last {
+                    Rectangle()
+                        .fill(i < index(reached) ? Theme.accent.opacity(0.6) : Color.white.opacity(0.15))
+                        .frame(width: 10, height: 1.5)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .background(Theme.panel)
+    }
+
+    /// 底部：上一步 / 下一步。最后一步换成生成按钮（在面板里）。
+    private var stepFooter: some View {
+        HStack(spacing: 10) {
+            if tab != steps.first {
+                Button { go(steps[index(tab) - 1]) } label: {
+                    Label("上一步", systemImage: "chevron.left")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 46)
+                        .background(Theme.chip, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(model.running)
+            }
+            if tab != steps.last {
+                Button { go(steps[index(tab) + 1]) } label: {
+                    HStack(spacing: 6) {
+                        Text(tab == .cast && model.cast.isEmpty ? "跳过" : "下一步")
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity, minHeight: 46)
+                    .background(canAdvance ? Theme.accent : Theme.accent.opacity(0.35), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(!canAdvance)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+        .background(Theme.panel)
     }
 
     // MARK: 二、三级选项
@@ -345,9 +446,6 @@ struct MangaView: View {
                 Chip(title: "续接上一页", selected: model.continueFromLast) { model.continueFromLast.toggle() }
                     .opacity(model.pages.isEmpty ? 0.35 : 1)
                     .disabled(model.pages.isEmpty)
-                Text(model.pages.isEmpty ? "画出第一页后，可以让下一页接着画" : "打开后，新的一页会延续上一页的画风和人物")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.dim)
                 Spacer()
             }
         }
@@ -367,7 +465,6 @@ struct MangaView: View {
                             .foregroundStyle(.black)
                             .frame(width: 66, height: 88)
                             .background(Theme.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            Text("从照片生成").font(.system(size: 10)).foregroundStyle(Theme.dim)
                         }
                     }
                     .buttonStyle(.plain)
@@ -426,14 +523,13 @@ struct MangaView: View {
                 }
                 .padding(.vertical, 2)
             }
-            Text(library.characters.isEmpty
-                 ? "角色库还是空的。点\u{201C}新建\u{201D}，给一张照片就能生成角色。"
-                 : (model.cast.isEmpty ? "点角色让它在这一页出场，最多 4 个；长按进角色详情，可以画三视图或删除。"
-                                       : "这一页出场：\(model.cast.map(\.name).joined(separator: "、"))"))
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.dim)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if !model.cast.isEmpty {
+                Text("出场：\(model.cast.map(\.name).joined(separator: "、"))")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.accent)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -531,6 +627,7 @@ struct MangaView: View {
                     .foregroundStyle(.black)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background(Theme.accent, in: Capsule())
+                    .overlay(alignment: .topTrailing) { CornerBadge(text: "AI").offset(x: -6, y: -5) }
             }
             .buttonStyle(.plain)
             if let usage = model.usageText {

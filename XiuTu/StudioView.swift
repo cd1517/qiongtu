@@ -58,6 +58,8 @@ struct StudioView: View {
 
     @State private var model = StudioModel()
     @State private var tab: Tab = .scene
+    /// 走到过的最远一步。
+    @State private var reached: Tab = .scene
     @State private var personGroup: PersonGroup = .gender
     @State private var cameraGroup: CameraGroup = .photographer
     @State private var moodGroup: SceneLook.Group = .time
@@ -79,8 +81,12 @@ struct StudioView: View {
                 content.frame(maxWidth: .infinity, maxHeight: .infinity)
                 // 还没判断出拍人物还是拍场景时，先不把菜单亮出来，免得闪一下又换掉。
                 Group {
+                    StepBar(steps: Tab.list(model.subject), current: tab, reached: reached,
+                            title: { $0.title }, disabled: model.running) { go($0) }
                     panel
-                    BottomTabBar(tabs: Tab.list(model.subject), title: { $0.title }, selection: $tab)
+                    StepFooter(isFirst: tab == Tab.list(model.subject).first, isLast: tab == Tab.list(model.subject).last,
+                               disabled: model.running,
+                               back: { step(-1) }, next: { step(1) })
                 }
                 .opacity(model.isLoading ? 0 : 1)
             }
@@ -123,9 +129,24 @@ struct StudioView: View {
         .sheet(isPresented: $showSettings) { SettingsView() }
     }
 
-    /// 换了主体以后，当前停着的菜单如果不在新的一套里，就回到第一个。
+    private func go(_ t: Tab) {
+        let list = Tab.list(model.subject)
+        withAnimation(.easeOut(duration: 0.15)) {
+            tab = t
+            if (list.firstIndex(of: t) ?? 0) > (list.firstIndex(of: reached) ?? 0) { reached = t }
+        }
+    }
+
+    private func step(_ delta: Int) {
+        let list = Tab.list(model.subject)
+        guard let i = list.firstIndex(of: tab), list.indices.contains(i + delta) else { return }
+        go(list[i + delta])
+    }
+
+    /// 换了主体以后，步骤换了一套，从第一步重新走。
     private func fitMenus() {
-        if !Tab.list(model.subject).contains(tab) { tab = Tab.list(model.subject)[0] }
+        tab = Tab.list(model.subject)[0]
+        reached = tab
         if !CameraGroup.list(model.subject).contains(cameraGroup) { cameraGroup = .photographer }
     }
 
@@ -214,7 +235,7 @@ struct StudioView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            Text("\(shot.id + 1) · \(shot.framingTitle) · \(shot.photographer)")
+            Text(([String(shot.id + 1), shot.framingTitle, shot.photographer]).filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.white)
                 .lineLimit(1)
@@ -258,8 +279,11 @@ struct StudioView: View {
         VStack(spacing: 10) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
+                    Chip(title: "原背景", symbol: "photo", selected: model.sceneID == "keep") { model.sceneID = "keep" }
+                    Rectangle().fill(Theme.chip).frame(width: 1, height: 20)
                     ForEach(model.catalog.categories.indices, id: \.self) { index in
-                        Chip(title: model.catalog.categories[index].title, selected: model.categoryIndex == index) {
+                        Chip(title: model.catalog.categories[index].title,
+                             selected: model.sceneID != "keep" && model.categoryIndex == index) {
                             model.selectCategory(index)
                         }
                     }

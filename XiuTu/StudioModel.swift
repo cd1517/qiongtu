@@ -58,7 +58,7 @@ final class StudioModel {
         }
     }
 
-    let catalog: Catalog
+    var catalog: Catalog
     let engine = GodCoverEngine()
 
     var isLoading = true
@@ -76,17 +76,19 @@ final class StudioModel {
 
     // 场景
     var categoryIndex = 0
-    var sceneID = ""
+    /// "keep" = 不换地方，保持原照片的背景。
+    var sceneID = "keep"
     var sceneHint = ""
     // 人物
     var gender = "auto"
     var persona = "random"
     var age = "original"
-    var beauty = "subtle"
+    var beauty = "none"
     var retouchParts: Set<String> = []
     var hairColors: Set<String> = []
     // 摄影
-    var photographer = "random"
+    /// "none" = 不指定摄影师。
+    var photographer = "none"
     var equipment = "auto"
     var timeOfDay = "auto"
     var brands: Set<String> = []
@@ -110,7 +112,8 @@ final class StudioModel {
         } else {
             catalog = Catalog()
         }
-        sceneID = catalog.categories.first?.scenes.first?.id ?? ""
+        // 每一项都可以不选。
+        catalog.photographers.insert(Option(id: "none", title: "不指定"), at: 0)
     }
 
     var scenes: [Option] {
@@ -122,7 +125,6 @@ final class StudioModel {
 
     func selectCategory(_ index: Int) {
         categoryIndex = index
-        sceneID = scenes.first?.id ?? ""
     }
 
     func load(assetID: String) async {

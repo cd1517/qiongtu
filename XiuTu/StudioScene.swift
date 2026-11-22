@@ -122,7 +122,7 @@ enum StudioScene {
     static func plan(photographer: String, equipment: String, photographers: [StudioModel.Option], equipmentList: [StudioModel.Option],
                      picks: [SceneLook.Group: String], variations chosen: Set<String>, count: Int, explore: Bool,
                      orientation: String) -> [Planned] {
-        let real = photographers.filter { $0.id != "random" }
+        let real = photographers.filter { $0.id != "random" && $0.id != "none" }
         guard !real.isEmpty else { return [] }
         func title(_ id: String) -> String { real.first { $0.id == id }?.title ?? id }
 
@@ -141,19 +141,23 @@ enum StudioScene {
         }
         let total = explore ? min(6, real.count) : max(1, count)
         // 每张用哪位摄影师：试拍每张换一位；否则整组同一位（选了"随机"就抽一位）。
-        let fixed = photographer == "random" || !real.contains { $0.id == photographer } ? real.randomElement()!.id : photographer
+        let fixed = photographer == "none" ? "" : (photographer == "random" || !real.contains { $0.id == photographer } ? real.randomElement()!.id : photographer)
         let people = explore ? real.shuffled().prefix(total).map(\.id) : Array(repeating: fixed, count: total)
 
         return (0..<total).map { index in
             let (variation, take) = pool[index % pool.count]
             let who = people[index]
-            let style = photographerStyle[who] ?? "\(title(who))：按这位摄影师的典型风格处理光线、影调和色彩。"
             var parts = [
                 "这是一张场景照片，画面里的这个场景本身就是拍摄对象。请摄影师到同一个地方把它重新拍一张，输出一张真实的摄影作品。",
                 SceneLook.keepScene,
                 SceneLook.noPerson,
-                "【摄影风格】\(style)只借用这位摄影师处理光线、影调、色彩、质感和构图的方式；其作品里常见的人物、模特和道具一概不要带进来。",
             ]
+            if !who.isEmpty {
+                let style = photographerStyle[who] ?? "\(title(who))：按这位摄影师的典型风格处理光线、影调和色彩。"
+                parts.append("【摄影风格】\(style)只借用这位摄影师处理光线、影调、色彩、质感和构图的方式；其作品里常见的人物、模特和道具一概不要带进来。")
+            } else {
+                parts.append("【摄影风格】保持原照片的色调和风格，只是拍得更专业、更好看。")
+            }
             if let gearText { parts.append("【器材】\(gearText)") }
             parts.append(SceneLook.atmosphere(picks))
             var shot = "【这一张】第 \(index + 1) / \(total) 张 · \(variation.title)：\(take)"
@@ -167,7 +171,7 @@ enum StudioScene {
                 parts.append("【整组】这一组照片拍的是同一个地方、同一个时刻，出自同一位摄影师，只有机位和景别不同。")
             }
             parts.append("【输出】\(orientation)画面。真实的照片质感，不要插画或 3D 渲染的感觉；画面里不要出现任何文字、水印和边框。")
-            return Planned(prompt: parts.joined(separator: "\n"), variation: variation.title, photographer: title(who))
+            return Planned(prompt: parts.joined(separator: "\n"), variation: variation.title, photographer: who.isEmpty ? "" : title(who))
         }
     }
 }

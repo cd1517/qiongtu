@@ -6106,9 +6106,10 @@ window.gcStudio = (function () {
   function plan(p) {
     var isExplore = !!p.explore;
     var photographerKeys = Object.keys(PHOTO_SCHOOLS_PROMPTS);
-    var photographer = p.photographer === "random" || !p.photographer
-      ? photographerKeys[Math.floor(Math.random() * photographerKeys.length)] : p.photographer;
-    var scene = SCENE_LIBRARY[p.mainCategory][p.subScene];
+    var photographer = p.photographer === "none" ? "" : (p.photographer === "random" || !p.photographer
+      ? photographerKeys[Math.floor(Math.random() * photographerKeys.length)] : p.photographer);
+    var keepScene = p.subScene === "keep" || !(SCENE_LIBRARY[p.mainCategory] && SCENE_LIBRARY[p.mainCategory][p.subScene]);
+    var scene = keepScene ? { prompt: "Keep the ORIGINAL photo's location and background exactly as they are — same place, same surroundings, same environment. Do not move the subject to a different location." } : SCENE_LIBRARY[p.mainCategory][p.subScene];
     var sceneHint = String(p.sceneHint || "").trim();
     var personaPrompt = PERSONA_PROMPTS[p.persona] || "";
     var genderPrompt = GENDER_PROMPTS[p.gender] || "";
@@ -6150,7 +6151,7 @@ window.gcStudio = (function () {
       return {
         prompt: sanitizeGenerationPrompt(prompt),
         framing: shot.framingKey || "",
-        photographer: PHOTOGRAPHER_LABEL[shotPh] || shotPh,
+        photographer: shotPh ? (PHOTOGRAPHER_LABEL[shotPh] || shotPh) : "",
         equipment: EQUIPMENT_LABEL[shotEq] || "",
       };
     });
