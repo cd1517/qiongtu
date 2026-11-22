@@ -163,25 +163,33 @@ extension EditorModel {
         }
     }
 
-    /// 把原照片里的人贴回融合结果：人物的细节用原图，光影颜色跟着融合结果走；人物边缘往外扩一点再羽化，盖住 AI 留下的重影。
+    /// 把原照片里的人贴回融合结果：人物的细节用原图，整体的光影颜色跟着融合结果走。
+    /// 蒙版往里收一点再羽化，边上用的是 AI 那一圈像素，原图的背景（比如绿树）不会被带出来，就没有色边。
+    /// AI 的背景往往锐化过头，轻轻柔一下，和原图人物的清晰度对上。
     nonisolated static func restorePerson(fused: CGImage, base: CIImage, mask: CGImage) -> CGImage? {
         let b = base.transformed(by: CGAffineTransform(translationX: -base.extent.minX, y: -base.extent.minY))
         let extent = b.extent
         // 不超过 4096，免得太占内存。
         let k = min(1, 4096 / max(extent.width, extent.height))
         let target = CGRect(x: 0, y: 0, width: (extent.width * k).rounded(), height: (extent.height * k).rounded())
+        let dim = max(target.width, target.height)
         let original = b.transformed(by: CGAffineTransform(scaleX: target.width / extent.width, y: target.height / extent.height))
             .cropped(to: target)
         var ai = CIImage(cgImage: fused)
         ai = ai.transformed(by: CGAffineTransform(scaleX: target.width / ai.extent.width, y: target.height / ai.extent.height))
             .cropped(to: target)
-        let person = ToneTransfer.apply(original: original, graded: ai)
-        let dim = max(target.width, target.height)
+        // 背景去掉过度锐化：和轻微模糊的自己对半混。
+        let soft = ai.clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: dim * 0.0007])
+            .cropped(to: target)
+        ai = FX.mix(ai, soft, t: 0.55)
+        // 人物：用大半径取光影，只跟着整体的明暗冷暖走，不会出现一块块的色斑。
+        let person = ToneTransfer.apply(original: original, graded: ai, radius: dim * 0.06)
         let m = CIImage(cgImage: mask, options: [.colorSpace: NSNull()])
             .transformed(by: CGAffineTransform(scaleX: target.width / CGFloat(mask.width), y: target.height / CGFloat(mask.height)))
             .clampedToExtent()
-            .applyingFilter("CIMorphologyMaximum", parameters: [kCIInputRadiusKey: dim * 0.006])
-            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: dim * 0.004])
+            .applyingFilter("CIMorphologyMinimum", parameters: [kCIInputRadiusKey: dim * 0.0025])
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: dim * 0.0025])
             .cropped(to: target)
         let out = person.applyingFilter("CIBlendWithMask", parameters: [
             kCIInputBackgroundImageKey: ai,

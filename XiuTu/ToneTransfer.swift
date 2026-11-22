@@ -13,9 +13,10 @@ enum ToneTransfer {
     }
     """)
 
-    static func apply(original: CIImage, graded: CIImage) -> CIImage {
+    /// radius 不给就用长边的 1.2%（修逆光这类要跟着局部光影走）；给大半径就只跟整体的明暗冷暖。
+    static func apply(original: CIImage, graded: CIImage, radius: CGFloat? = nil) -> CIImage {
         let extent = original.extent
-        let radius = max(extent.width, extent.height) * 0.012
+        let radius = radius ?? max(extent.width, extent.height) * 0.012
         func soft(_ image: CIImage) -> CIImage {
             image.clampedToExtent()
                 .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: radius])
