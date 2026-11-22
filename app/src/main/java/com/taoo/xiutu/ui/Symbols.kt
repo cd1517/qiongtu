@@ -3,6 +3,7 @@ package com.taoo.xiutu.ui
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.automirrored.filled.Undo
@@ -204,4 +205,11 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "hand.tap" to Icons.Filled.TouchApp,
     "scanner" to Icons.Filled.Scanner,
     "shadow" to Icons.Filled.FilterNone,
+    // 漫画人生
+    "book.pages" to Icons.AutoMirrored.Filled.MenuBook,
+    "pencil.and.outline" to Icons.Filled.Draw,
+    "person.crop.rectangle.badge.plus" to Icons.Filled.PersonAdd,
+    "exclamationmark.triangle" to Icons.Outlined.Warning,
+    "person.3.sequence" to Icons.Outlined.Groups,
+    "person.3.sequence.fill" to Icons.Filled.Groups,
 )
