@@ -31,6 +31,14 @@ enum AIIntent {
     Keep the exact same framing and position of everything so the result can be overlaid on the original. Photorealistic.
     """
 
+    /// 修手抖：去掉拍摄时相机晃动造成的拖影和重影。涂抹了就只修涂抹的部分，背景的动感保留。
+    static let deshakePrompt = """
+    这张照片拍的时候相机晃了，画面有手抖造成的运动模糊、拖影和重影。把手抖去掉：\
+    把重影合回一个清晰的轮廓，恢复锐利的边缘和真实的细节（文字、车牌、灯、发丝、纹理都要清楚），就像用安全快门、稳稳拍下的同一张照片。\
+    这是还原，不是重画：构图、视角、所有东西的形状大小和位置、颜色、光线都和原图一致，结果要能和原图逐像素对齐叠在一起。\
+    不要磨皮美化，不要改人物长相，不要加任何新东西。真实的照片质感。
+    """
+
     /// 指令是不是"把涂抹的东西去掉/换掉"这一类。
     /// 这一类才把涂抹区域当蒙版发出去（蒙版里的内容 AI 看不到，会从头重画）；
     /// 其他指令（提亮、磨皮、瘦身……）是在原有内容上修改，AI 必须能看到原图，所以不发蒙版。
@@ -112,6 +120,7 @@ enum AIPresetGroup: String, CaseIterable, Identifiable {
             return [
                 AIPreset(title: "一键修复", symbol: "wand.and.stars", prompt: "你是一位摄影大师兼调色师。先判断这张照片在曝光和色彩上的毛病（过曝或欠曝、逆光导致主体太暗、高光溢出、暗部死黑、偏色和白平衡不准、灰雾、反差不足或过头），然后把它调成一张曝光和色彩都正确、自然好看的照片。只改曝光、明暗和颜色；不要移动、裁剪、旋转或改变画面里任何东西的形状和位置，结果要和原图逐像素对齐。", toneOnly: true),
                 AIPreset(title: "修跑焦", symbol: "camera.viewfinder", prompt: AIIntent.refocusPrompt, faceCrop: true),
+                AIPreset(title: "修手抖", symbol: "hand.raised.slash", prompt: AIIntent.deshakePrompt),
                 AIPreset(title: "修过曝", symbol: "sun.max", prompt: "修复过曝：找回高光里的层次，压住发白的天空和皮肤。只改曝光、明暗和颜色；不要移动、裁剪、旋转或改变画面里任何东西的形状和位置，结果要和原图逐像素对齐。", toneOnly: true),
                 AIPreset(title: "修逆光", symbol: "sun.horizon", prompt: "修复逆光和欠曝：把人物和暗部提亮到正常，像补了一盏柔和的面光；保留背景亮部的层次，不要发灰。只改曝光、明暗和颜色；不要移动、裁剪、旋转或改变画面里任何东西的形状和位置，结果要和原图逐像素对齐。", toneOnly: true),
                 AIPreset(title: "去紫边", symbol: "rainbow", prompt: "去掉高反差边缘上的紫边、蓝边和绿边（色差），其他不变。"),
@@ -282,6 +291,51 @@ enum AIPresetGroup: String, CaseIterable, Identifiable {
     }
 }
 
+/// AI 构图时输出成什么画幅。
+enum AIReframe: String, CaseIterable, Identifiable {
+    case original, portrait, landscape, square
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .original: return "原比例"
+        case .portrait: return "竖幅"
+        case .landscape: return "横幅"
+        case .square: return "方形"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .original: return "aspectratio"
+        case .portrait: return "rectangle.portrait"
+        case .landscape: return "rectangle"
+        case .square: return "square"
+        }
+    }
+
+    /// 输出尺寸（各家都支持的标准尺寸）。
+    var size: CGSize? {
+        switch self {
+        case .original: return nil
+        case .portrait: return CGSize(width: 1024, height: 1536)
+        case .landscape: return CGSize(width: 1536, height: 1024)
+        case .square: return CGSize(width: 1024, height: 1024)
+        }
+    }
+
+    /// 写进指令里的说法。
+    var instruction: String {
+        switch self {
+        case .original: return ""
+        case .portrait: return "竖幅（2:3，竖着拿相机拍的）"
+        case .landscape: return "横幅（3:2，横着拿相机拍的）"
+        case .square: return "方形（1:1）"
+        }
+    }
+}
+
 /// 一次 AI 改图的结果，作为编辑历史里的一步。
 /// 涂抹过区域时，只把该区域换成 AI 的结果，其余部分保持原图和原分辨率。
 struct AIEdit {
@@ -295,11 +349,21 @@ struct AIEdit {
     var strength: CGFloat = 1
     /// 只采用 AI 的光影和颜色，细节用原图（修逆光、修过曝这类用）。
     var toneOnly = false
+    /// 换了画幅的构图：结果整张替换原图，画面比例跟着 AI 的结果走。
+    var reframed = false
 
     var hasRegion: Bool { strokes.contains { !$0.erase } }
 
     func apply(to image: CIImage) -> CIImage {
         let extent = image.extent
+        if reframed {
+            // 长边和原图一样长，比例按 AI 给的。
+            let r = CIImage(cgImage: result)
+            let k = max(extent.width, extent.height) / max(r.extent.width, r.extent.height)
+            let w = (r.extent.width * k).rounded(), h = (r.extent.height * k).rounded()
+            return r.transformed(by: CGAffineTransform(scaleX: w / r.extent.width, y: h / r.extent.height))
+                .cropped(to: CGRect(x: 0, y: 0, width: w, height: h))
+        }
         var target = extent
         if let f = frame {
             target = CGRect(x: f.minX * extent.width, y: (1 - f.maxY) * extent.height,
@@ -430,8 +494,12 @@ enum AIRunner {
     }
 
     static func run(endpoint: AIEndpoint, prompt: String, proxy: CIImage, ops: [EditOp],
-                    strokes: [MosaicStroke], crop: CGRect? = nil, appendGuidance: Bool = true) async throws -> CGImage {
+                    strokes: [MosaicStroke], crop: CGRect? = nil, appendGuidance: Bool = true,
+                    reframe: AIReframe = .original, references: [UIImage] = []) async throws -> CGImage {
         var current = EditOp.apply(ops, to: proxy)
+        if let target = reframe.size {
+            return try await runReframed(endpoint: endpoint, prompt: prompt, image: current, target: target, reframe: reframe)
+        }
         if let crop {
             let e = current.extent
             let r = CGRect(x: crop.minX * e.width, y: (1 - crop.maxY) * e.height,
@@ -472,8 +540,9 @@ enum AIRunner {
                     mask = maskPNG(strokes: strokes, size: target, content: content)
                     request += " Apply the change only inside the masked (transparent) area and blend it seamlessly with the surroundings."
                 }
-                let payload = AIPayload(prompt: request, image: png, imageMime: "image/png", maskPNG: mask, markedJPEG: nil,
+                var payload = AIPayload(prompt: request, image: png, imageMime: "image/png", maskPNG: mask, markedJPEG: nil,
                                         size: "\(Int(target.width))x\(Int(target.height))")
+                payload.extraImages = references.compactMap { AIOneShot.prepared($0, maxSide: 1024).pngData() }
                 let data = try await AIClient.edit(endpoint, payload)
                 guard let image = UIImage(data: data)?.cgImage else { throw AIError(text: "服务商返回的不是有效图片。") }
                 let fx = CGFloat(image.width) / target.width
@@ -515,10 +584,53 @@ enum AIRunner {
             marked = context.jpegRepresentation(of: AIRegion.overlay(base: small, mask: cg), colorSpace: sRGB, options: [quality: 0.9])
             text += " The second image is the same photo with the region to edit highlighted in red. Change only that region, and return the first photo edited, without any red marking."
         }
-        let payload = AIPayload(prompt: text, image: jpeg, imageMime: "image/jpeg", maskPNG: nil, markedJPEG: marked, size: "auto")
+        var payload = AIPayload(prompt: text, image: jpeg, imageMime: "image/jpeg", maskPNG: nil, markedJPEG: marked, size: "auto")
+        payload.extraImages = references.compactMap { AIOneShot.prepared($0, maxSide: 1024).jpegData(compressionQuality: 0.92) }
         let data = try await AIClient.edit(endpoint, payload)
         guard let image = UIImage(data: data)?.cgImage else { throw AIError(text: "服务商返回的不是有效图片。") }
         return try standalone(image)
+    }
+
+    /// 换画幅的构图：把原图居中放进新画幅，空出来的地方先用虚化放大的原图垫着，让 AI 整张重新构图。
+    private static func runReframed(endpoint: AIEndpoint, prompt: String, image: CIImage, target: CGSize,
+                                    reframe: AIReframe) async throws -> CGImage {
+        let source = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+        let e = source.extent
+        let canvasRect = CGRect(origin: .zero, size: target)
+        // 垫底：原图放大铺满、虚化、压暗一点。
+        let fill = max(target.width / e.width, target.height / e.height)
+        let back = source.transformed(by: CGAffineTransform(scaleX: fill, y: fill))
+            .transformed(by: CGAffineTransform(translationX: (target.width - e.width * fill) / 2,
+                                               y: (target.height - e.height * fill) / 2))
+            .clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: max(target.width, target.height) * 0.03])
+            .applyingFilter("CIColorControls", parameters: [kCIInputBrightnessKey: -0.08])
+            .cropped(to: canvasRect)
+        let fit = min(target.width / e.width, target.height / e.height)
+        let front = source.transformed(by: CGAffineTransform(scaleX: fit, y: fit))
+            .transformed(by: CGAffineTransform(translationX: (target.width - e.width * fit) / 2,
+                                               y: (target.height - e.height * fit) / 2))
+        let canvas = front.composited(over: back).cropped(to: canvasRect)
+        let text = prompt + "\n\n【画幅】输出一张\(reframe.instruction)的照片。给你的图里只有中间清楚的那一块是原照片，四周虚化的部分只是占位，不要保留虚化。" +
+            "按上面的构图要求，在新画幅里重新安排画面：原图边缘以外缺的部分，按原场景合理地补全延伸（天空、地面、建筑、背景都要连贯真实）。" +
+            "人物的长相、身材、姿势和服装不变，不要拉伸或压扁任何东西。结果必须是一张完整、清晰、真实的照片。"
+        let context = Renderer.shared.context
+        let data: Data?
+        let mime: String
+        if endpoint.provider.supportsMask {
+            data = context.pngRepresentation(of: canvas, format: .RGBA8, colorSpace: sRGB)
+            mime = "image/png"
+        } else {
+            let quality = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
+            data = context.jpegRepresentation(of: canvas, colorSpace: sRGB, options: [quality: 0.92])
+            mime = "image/jpeg"
+        }
+        guard let data else { throw AIError(text: "图片编码失败。") }
+        let payload = AIPayload(prompt: text, image: data, imageMime: mime, maskPNG: nil, markedJPEG: nil,
+                                size: "\(Int(target.width))x\(Int(target.height))")
+        let out = try await AIClient.edit(endpoint, payload)
+        guard let result = UIImage(data: out)?.cgImage else { throw AIError(text: "服务商返回的不是有效图片。") }
+        return try standalone(result)
     }
 
     /// 把解码出来的图重新画成一张独立的 8 位 sRGB 位图。

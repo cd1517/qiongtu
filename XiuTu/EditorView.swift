@@ -39,6 +39,7 @@ enum MainTab: String, CaseIterable, Identifiable {
             ]
         case .beauty:
             return [
+                MenuEntry(title: "满意脸型", symbol: "star.fill", badge: "AI", action: .favoriteFace),
                 MenuEntry(title: "一键美颜", symbol: "sparkles", badge: "AI", action: .beauty(manual: false)),
                 MenuEntry(tool: .reshape), MenuEntry(tool: .makeup), MenuEntry(tool: .skin),
                 MenuEntry(title: "手动美颜", symbol: "slider.horizontal.3", action: .beauty(manual: true)),
@@ -80,6 +81,8 @@ enum MenuAction {
     /// AI 消除：直接进涂抹。
     case erase
     case beauty(manual: Bool)
+    /// 进美颜后直接按满意脸型修。
+    case favoriteFace
     /// 美体塑形，直接进到指定的那一种做法。
     case shape(ShapeMode)
 }
@@ -479,6 +482,16 @@ struct EditorView: View {
         case .beauty(let manual):
             start(.beauty)
             if model.tool == .beauty { model.beautyMode = manual ? .manual : .ai }
+        case .favoriteFace:
+            guard FavoriteFaceStore.shared.current != nil else {
+                show("还没有满意脸型")
+                return
+            }
+            start(.beauty)
+            if model.tool == .beauty {
+                model.beautyMode = .ai
+                model.runFavoriteAfterDetect = true
+            }
         case .shape(let mode):
             start(.shape)
             if model.tool == .shape { model.setShapeMode(mode) }

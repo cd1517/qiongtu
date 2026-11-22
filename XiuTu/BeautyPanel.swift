@@ -193,6 +193,12 @@ struct BeautyPanel: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         Chip(title: "原图", selected: !model.aiHasResult) { model.discardFaceAI() }
+                        if FavoriteFaceStore.shared.current != nil {
+                            Chip(title: model.isFaceStyleCached(.favorite) ? "满意脸型 ✓" : "满意脸型", symbol: "star.fill",
+                                 selected: model.beautyStyle == BeautyStyle.favorite.id && model.aiHasResult, badge: "AI") {
+                                model.runFavoriteFace()
+                            }
+                        }
                         ForEach(BeautyStyle.all) { style in
                             Chip(title: model.isFaceStyleCached(style) ? "\(style.title) ✓" : style.title,
                                  selected: model.beautyStyle == style.id && model.aiHasResult, badge: "AI") {

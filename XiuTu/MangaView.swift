@@ -135,7 +135,6 @@ struct MangaView: View {
     /// 走到过的最远一步：之前的步骤随时能点回去改，后面的要一步步走过去。
     @State private var reached: Tab = .material
     @State private var picked: [PhotosPickerItem] = []
-    @State private var editingNote = false
     @State private var viewing: UIImage?
     @State private var showSettings = false
     @State private var creatingCharacter = false
@@ -167,12 +166,6 @@ struct MangaView: View {
                         .padding(.bottom, 250)
                 }
                 .allowsHitTesting(false)
-            }
-            if editingNote {
-                TextInputOverlay(initial: model.note, placeholder: "补充说明，比如：主角戴墨镜、下雨的夜晚") { value in
-                    model.note = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                    editingNote = false
-                }
             }
             if let viewing {
                 ResultViewer(image: viewing) { self.viewing = nil }
@@ -575,21 +568,6 @@ struct MangaView: View {
     private var bubblePanel: some View {
         VStack(spacing: 10) {
             ChipRow(items: MangaModel.bubbleModes, title: { $0.title }, isSelected: { model.bubbleMode == $0.id }) { model.bubbleMode = $0.id }
-            Button { editingNote = true } label: {
-                HStack {
-                    Text(model.note.isEmpty ? "补充说明（可不填）" : model.note)
-                        .font(.system(size: 13))
-                        .foregroundStyle(model.note.isEmpty ? Theme.dim : Color.white)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    Spacer()
-                    Image(systemName: "pencil").font(.system(size: 12)).foregroundStyle(Theme.dim)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(.plain)
         }
     }
 

@@ -64,6 +64,8 @@ final class StudioModel {
     var isLoading = true
     var errorText: String?
     var original: UIImage?
+    /// 摄影师、器材格子上的小图（key 见 StudioLooks），"original" 是原图。打开照片后在后台算一次。
+    var thumbs: [String: UIImage] = [:]
 
     /// 拍人物（原来的玩法）还是拍场景（照片里的场景就是拍摄对象，不加人）。打开照片时自动判断，可以手动换。
     var subject: SubjectMode = .person
@@ -138,6 +140,14 @@ final class StudioModel {
         subject = await SubjectMode.detect(in: photo)
         original = photo
         isLoading = false
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let out = StudioLooks.render(photo)
+            await self?.setThumbs(out)
+        }
+    }
+
+    private func setThumbs(_ out: [String: UIImage]) {
+        thumbs = out
     }
 
     func toggleSceneVariation(_ id: String) {

@@ -359,6 +359,15 @@ struct BeautyStyle: Identifiable {
     Keep realistic skin texture with visible pores; no plastic or airbrushed look. Photorealistic result. Style:
     """
 
+    /// 满意脸型：第二张图是用户自己修满意的脸，照着它修。
+    static let favorite = BeautyStyle(title: "满意脸型", prompt: """
+    match the user's own favorite retouch. The SECOND image is a reference: a face this user retouched before and is happy with. \
+    Retouch the face in the FIRST image so it has the same look as the reference — the same face shape and jaw contour, face slimness, \
+    eye size and shape, nose and lip refinement, skin smoothness and glow, and the same makeup style and colors. \
+    Keep the identity of the person in the FIRST image: if the reference looks like a different person, transfer only the retouching \
+    (slimness, eye enlargement, skin finish, makeup), never their facial identity. Return only the edited first image.
+    """)
+
     static let all: [BeautyStyle] = [
         BeautyStyle(title: "自然", prompt: "natural retouch. Even out skin tone, remove blemishes and reduce dark circles, slightly brighter eyes. Very subtle; it should look like a great photo of them on a good day."),
         BeautyStyle(title: "韩系", prompt: "Korean beauty look. Luminous dewy glass skin, clear and bright complexion, soft straight brows, gentle gradient lips, soft rosy cheeks, delicate and fresh."),

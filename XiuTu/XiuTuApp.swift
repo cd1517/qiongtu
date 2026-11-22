@@ -22,6 +22,7 @@ enum Route: Hashable {
     case rawPicker
     case editorFile(URL)
     case history
+    case favoriteFace
 }
 
 struct RootView: View {
@@ -34,7 +35,8 @@ struct RootView: View {
                      startStudio: { path.append(.studioPicker) },
                      startManga: { path.append(.manga) },
                      startRaw: { path.append(.rawPicker) },
-                     startHistory: { path.append(.history) })
+                     startHistory: { path.append(.history) },
+                     startFavorite: { path.append(.favoriteFace) })
                 .navigationDestination(for: Route.self) { route in
                     switch route {
                     case .picker(let tool):
@@ -72,6 +74,8 @@ struct RootView: View {
                         EditorView(assetID: "", fileURL: url, initialTool: nil) {
                             if !path.isEmpty { path.removeLast() }
                         }
+                    case .favoriteFace:
+                        FavoriteFaceView { path.removeAll() }
                     case .history:
                         HistoryView(onEdit: { url in path.append(.editorFile(url)) },
                                     onClose: { path.removeAll() })
@@ -89,6 +93,7 @@ struct HomeView: View {
     var startManga: () -> Void = {}
     var startRaw: () -> Void = {}
     var startHistory: () -> Void = {}
+    var startFavorite: () -> Void = {}
 
     @State private var showSettings = false
     private let history = HistoryStore.shared
@@ -150,6 +155,8 @@ struct HomeView: View {
                     featureButton(symbol: "book.pages.fill", title: "漫画人生", subtitle: "把生活照片画成漫画 · 15 种画风", action: startManga)
                     featureButton(symbol: history.hasPassword ? "lock.fill" : "photo.stack", title: "历史图库",
                                   subtitle: "\(history.items.count) 张", action: startHistory)
+                    featureButton(symbol: "star.fill", title: "满意脸型",
+                                  subtitle: "\(FavoriteFaceStore.shared.faces.count) 个", action: startFavorite)
                 }
 
                 Spacer()

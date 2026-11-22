@@ -102,6 +102,10 @@ final class EditorModel {
     var aiFaceCrop = false
     /// 美发类指令：没涂抹时自动找到人脸，把头和头发这一大块发给 AI（比修跑焦的范围大，长发也能包住）。
     var aiHairCrop = false
+    /// 构图时输出的画幅；原比例 = 跟原图一样。
+    var aiReframe: AIReframe = .original
+    /// 当前这次结果是不是换了画幅。
+    private(set) var aiResultReframed = false
     /// 只采用 AI 的光影和颜色、细节保留原图。结果出来后可以在面板上切换，不用重新生成。
     var aiToneOnly = false
     /// 最近一次请求的实际用量说明。
@@ -461,6 +465,7 @@ final class EditorModel {
         guard tool == .ai else { return }
         aiGroup = group
         aiPrompt = prompt
+        aiReframe = .original
         aiFaceCrop = false
         aiHairCrop = false
         aiToneOnly = false
@@ -1069,6 +1074,9 @@ final class EditorModel {
     private var currentAIEdit: AIEdit? {
         guard let result = aiResult else { return nil }
         // "只取光影色彩"只属于 AI 修图；美颜要的就是 AI 改过的脸，不能套这个模式。
+        if aiResultReframed {
+            return AIEdit(result: result, strokes: [], reframed: true)
+        }
         return AIEdit(result: result, strokes: aiStrokes, frame: aiFrame, ellipse: aiEllipse, strength: aiStrength,
                       toneOnly: aiToneOnly && tool == .ai)
     }
@@ -1104,6 +1112,14 @@ final class EditorModel {
             return
         }
         aiEllipse = nil
+        aiResultReframed = false
+        if aiGroup == .compose, aiReframe != .original {
+            // 换画幅：整张交给 AI 重新构图，不看涂抹。
+            aiFrame = nil
+            aiToneOnly = false
+            launchAI(prompt: prompt, strokes: [], crop: nil, guidance: false, reframe: aiReframe)
+            return
+        }
         if prompt.contains("涂抹区域"), !aiHasRegion {
             aiError = "先在图上涂抹要去掉的东西，再点发送。"
             return
@@ -1223,7 +1239,8 @@ final class EditorModel {
     }
 
     /// identity = true：必须还是同一个人的任务。画质设成"自动"时改用高画质，并要求尽量忠实于原图。
-    private func launchAI(prompt: String, strokes: [MosaicStroke], crop: CGRect?, guidance: Bool, identity: Bool = false) {
+    private func launchAI(prompt: String, strokes: [MosaicStroke], crop: CGRect?, guidance: Bool, identity: Bool = false,
+                          reframe: AIReframe = .original, references: [UIImage] = []) {
         guard let proxy, let started = tool else { return }
         guard var endpoint = AISettings.shared.endpoint() else {
             aiError = "还没有设置 \(AISettings.shared.active.shortTitle) 的 API Key。"
@@ -1247,12 +1264,14 @@ final class EditorModel {
         aiTask = Task { [weak self] in
             do {
                 let image = try await AIRunner.run(endpoint: endpoint, prompt: prompt, proxy: proxy, ops: ops,
-                                                   strokes: strokes, crop: crop, appendGuidance: guidance)
+                                                   strokes: strokes, crop: crop, appendGuidance: guidance, reframe: reframe,
+                                                   references: references)
                 let usage = AIClient.takeLastUsage()
                 if let cost = usage?.cost { AISettings.shared.addSpend(cost) }
                 guard let self, !Task.isCancelled, self.tool == started else { return }
                 self.aiUsageText = usage?.summary
                 self.aiResult = image
+                self.aiResultReframed = reframe != .original
                 self.aiHasResult = true
                 self.aiRunning = false
                 if started == .beauty, let key = self.pendingFaceKey, let frame = self.aiFrame, let ellipse = self.aiEllipse {
@@ -1297,6 +1316,10 @@ final class EditorModel {
             self.faceIndex = 0
             self.detectingFaces = false
             self.updateFocus()
+            if self.runFavoriteAfterDetect {
+                self.runFavoriteAfterDetect = false
+                if !found.isEmpty { self.runFavoriteFace() }
+            }
         }
     }
 
@@ -1421,7 +1444,19 @@ final class EditorModel {
 
     /// AI 美颜：只把选中的那张脸裁出来发给服务商，结果只贴回脸部的椭圆范围。
     /// 这张脸的这个风格之前生成过的话直接用记住的结果；force = true 时强制重新生成。
-    func runFaceAI(_ style: BeautyStyle, force: Bool = false) {
+    /// 一进美颜就按满意脸型修（主菜单"满意脸型"入口用）：等找完脸再开始。
+    var runFavoriteAfterDetect = false
+
+    /// 按满意脸型修当前这张脸。
+    func runFavoriteFace(force: Bool = false) {
+        guard let face = FavoriteFaceStore.shared.current, let reference = FavoriteFaceStore.shared.image(face) else {
+            aiError = "还没有满意脸型"
+            return
+        }
+        runFaceAI(.favorite, force: force, references: [reference])
+    }
+
+    func runFaceAI(_ style: BeautyStyle, force: Bool = false, references: [UIImage] = []) {
         guard tool == .beauty, !aiRunning, faces.indices.contains(faceIndex) else { return }
         let key = faceKey(style)
         if !force, let cached = faceCache[key] {
@@ -1448,11 +1483,13 @@ final class EditorModel {
         aiFrame = crop
         aiEllipse = ellipse
         pendingFaceKey = key
-        launchAI(prompt: BeautyStyle.preamble + " " + style.prompt, strokes: [], crop: crop, guidance: false, identity: true)
+        launchAI(prompt: BeautyStyle.preamble + " " + style.prompt, strokes: [], crop: crop, guidance: false, identity: true,
+                 references: references)
     }
 
     /// 对当前显示的这个风格重新生成一次（会再调用一次接口）。
     func regenerateFaceAI() {
+        if beautyStyle == BeautyStyle.favorite.id { return runFavoriteFace(force: true) }
         guard let style = BeautyStyle.all.first(where: { $0.id == beautyStyle }) else { return }
         runFaceAI(style, force: true)
     }
@@ -1460,6 +1497,7 @@ final class EditorModel {
     /// 换了服务商之后，把刚才那次请求原样重发。
     func retryAI() {
         if tool == .beauty {
+            if beautyStyle == BeautyStyle.favorite.id { return runFavoriteFace(force: true) }
             if let style = BeautyStyle.all.first(where: { $0.id == beautyStyle }) { runFaceAI(style, force: true) }
         } else {
             runAI()

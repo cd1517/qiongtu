@@ -409,6 +409,13 @@ struct HistoryViewer: View {
                         .foregroundStyle(.white)
                         .frame(minWidth: 58)
                     }
+                    IconTile(symbol: "star", title: "满意脸型") {
+                        Task {
+                            var ok = false
+                            if let data = try? Data(contentsOf: url) { ok = await FavoriteFaceStore.shared.add(from: data) }
+                            note = ok ? "已设为满意脸型" : "这张图里没有找到人脸"
+                        }
+                    }
                     IconTile(symbol: "trash", title: "删除") { confirmDelete = true }
                 }
                 .frame(maxWidth: .infinity)

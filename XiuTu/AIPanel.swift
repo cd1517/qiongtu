@@ -117,6 +117,15 @@ struct AIPanel: View {
         let master = model.aiGroup.usesTonePreview
         let pictures = master || model.aiGroup == .hairStyle
         return VStack(spacing: 10) {
+            if model.aiGroup == .compose {
+                // 构图可以换画幅：横图改竖图、竖图改横图。
+                HStack(spacing: 8) {
+                    ForEach(AIReframe.allCases) { item in
+                        Chip(title: item.title, symbol: item.symbol, selected: model.aiReframe == item) { model.aiReframe = item }
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: pictures ? 10 : 4) {
                     ForEach(model.aiGroup.presets) { preset in
@@ -217,13 +226,14 @@ struct AIPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             // 改形状的（美体、美发）没有"只取光影"这回事。
-            if !model.aiGroup.isHair, model.aiGroup != .body {
+            if !model.aiGroup.isHair, model.aiGroup != .body, !model.aiResultReframed {
                 HStack(spacing: 8) {
                     Chip(title: "只取光影色彩", selected: model.aiToneOnly) { model.setAIToneOnly(true) }
                     Chip(title: "完整采用 AI 图", selected: !model.aiToneOnly) { model.setAIToneOnly(false) }
                     Spacer()
                 }
             }
+            if !model.aiResultReframed {
             HStack(spacing: 12) {
                 Text("强度")
                     .font(.system(size: 13))
@@ -233,6 +243,7 @@ struct AIPanel: View {
                     .font(.system(size: 14, weight: .semibold))
                     .monospacedDigit()
                     .frame(width: 34, alignment: .trailing)
+            }
             }
             HStack(spacing: 10) {
                 Button { model.runAI() } label: {

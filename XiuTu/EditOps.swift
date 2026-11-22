@@ -351,6 +351,7 @@ extension EditOp {
     var changesCanvas: Bool {
         switch self {
         case .crop, .frame, .backdrop, .collage, .shape, .instant: return true
+        case .ai(let edit): return edit.reframed
         default: return false
         }
     }

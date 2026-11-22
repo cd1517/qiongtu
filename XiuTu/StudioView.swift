@@ -63,7 +63,6 @@ struct StudioView: View {
     @State private var personGroup: PersonGroup = .gender
     @State private var cameraGroup: CameraGroup = .photographer
     @State private var moodGroup: SceneLook.Group = .time
-    @State private var editingHint = false
     @State private var viewing: UIImage?
     @State private var showSettings = false
     @State private var toast: String?
@@ -109,12 +108,6 @@ struct StudioView: View {
                         .padding(.bottom, 250)
                 }
                 .allowsHitTesting(false)
-            }
-            if editingHint {
-                TextInputOverlay(initial: model.sceneHint, placeholder: "补充场景，比如：下雨天、樱花季") { value in
-                    model.sceneHint = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                    editingHint = false
-                }
             }
             if let viewing {
                 ResultViewer(image: viewing) { self.viewing = nil }
@@ -279,53 +272,61 @@ struct StudioView: View {
         VStack(spacing: 10) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    Chip(title: "原背景", symbol: "photo", selected: model.sceneID == "keep") { model.sceneID = "keep" }
-                    Rectangle().fill(Theme.chip).frame(width: 1, height: 20)
                     ForEach(model.catalog.categories.indices, id: \.self) { index in
-                        Chip(title: model.catalog.categories[index].title,
-                             selected: model.sceneID != "keep" && model.categoryIndex == index) {
+                        let title = model.catalog.categories[index].title
+                        Chip(title: StudioIcons.plain(title), symbol: StudioIcons.categorySymbol(title),
+                             selected: model.categoryIndex == index) {
                             model.selectCategory(index)
                         }
                     }
                 }
             }
-            ChipRow(items: model.scenes, title: { $0.title }, isSelected: { model.sceneID == $0.id }) { model.sceneID = $0.id }
-            Button { editingHint = true } label: {
-                HStack {
-                    Text(model.sceneHint.isEmpty ? "补充说明（可不填）" : model.sceneHint)
-                        .font(.system(size: 13))
-                        .foregroundStyle(model.sceneHint.isEmpty ? Theme.dim : Color.white)
-                        .lineLimit(1)
-                    Spacer()
-                    Image(systemName: "pencil").font(.system(size: 12)).foregroundStyle(Theme.dim)
+            // 原背景在最前面，用自己这张照片做缩略图；后面是这一类的场景。
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 8) {
+                    PickTile(title: "原背景", image: model.thumbs["original"], symbol: "photo",
+                             selected: model.sceneID == "keep") { model.sceneID = "keep" }
+                    Rectangle().fill(Theme.chip).frame(width: 1, height: StudioLooks.tileHeight - 16).padding(.top, 8)
+                    ForEach(model.scenes) { scene in
+                        let look = StudioIcons.sceneSymbol(scene.title, category: model.catalog.categories[model.categoryIndex].title)
+                        PickTile(title: StudioIcons.sceneName(scene.title), symbol: look.0, tint: look.1,
+                                 selected: model.sceneID == scene.id) { model.sceneID = scene.id }
+                    }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.vertical, 2)
             }
-            .buttonStyle(.plain)
+            .id(model.categoryIndex)
         }
     }
 
     private var personPanel: some View {
         VStack(spacing: 10) {
-            ChipRow(items: PersonGroup.allCases, title: { groupTitle($0) }, isSelected: { personGroup == $0 }) { personGroup = $0 }
+            SymbolChipRow(items: PersonGroup.allCases, title: { groupTitle($0) },
+                          symbol: { StudioIcons.personGroupSymbol($0.rawValue) }, isSelected: { personGroup == $0 }) { personGroup = $0 }
             switch personGroup {
             case .gender:
-                ChipRow(items: model.catalog.gender, title: { $0.title }, isSelected: { model.gender == $0.id }) { model.gender = $0.id }
+                SymbolChipRow(items: model.catalog.gender, title: { $0.title }, symbol: { StudioIcons.genderSymbols[$0.id] },
+                              isSelected: { model.gender == $0.id }) { model.gender = $0.id }
             case .persona:
-                ChipRow(items: model.catalog.persona, title: { $0.title }, isSelected: { model.persona == $0.id }) { model.persona = $0.id }
+                SymbolChipRow(items: model.catalog.persona, title: { $0.title }, symbol: { StudioIcons.personaSymbols[$0.id] },
+                              isSelected: { model.persona == $0.id }) { model.persona = $0.id }
             case .age:
-                ChipRow(items: model.catalog.age, title: { $0.title }, isSelected: { model.age == $0.id }) { model.age = $0.id }
+                SymbolChipRow(items: model.catalog.age, title: { $0.title }, symbol: { StudioIcons.ageSymbols[$0.id] },
+                              isSelected: { model.age == $0.id }) { model.age = $0.id }
             case .beauty:
-                ChipRow(items: model.catalog.beauty, title: { $0.title }, isSelected: { model.beauty == $0.id }) { model.beauty = $0.id }
+                SymbolChipRow(items: model.catalog.beauty, title: { $0.title }, symbol: { StudioIcons.beautySymbols[$0.id] },
+                              isSelected: { model.beauty == $0.id }) { model.beauty = $0.id }
             case .retouch:
-                ChipRow(items: model.catalog.retouchParts, title: { $0.title }, isSelected: { model.retouchParts.contains($0.id) }) {
-                    toggle(&model.retouchParts, $0.id)
-                }
+                SymbolChipRow(items: model.catalog.retouchParts, title: { $0.title }, symbol: { StudioIcons.retouchSymbols[$0.id] },
+                              isSelected: { model.retouchParts.contains($0.id) }) { toggle(&model.retouchParts, $0.id) }
             case .hair:
-                ChipRow(items: model.catalog.hairColors, title: { $0.title }, isSelected: { model.hairColors.contains($0.id) }) {
-                    toggle(&model.hairColors, $0.id)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(model.catalog.hairColors) { hair in
+                            SwatchChip(title: hair.title, swatch: StudioIcons.swatch(hair.swatch),
+                                       selected: model.hairColors.contains(hair.id)) { toggle(&model.hairColors, hair.id) }
+                        }
+                    }
                 }
             }
         }
@@ -339,47 +340,76 @@ struct StudioView: View {
         }
     }
 
+    /// 摄影师格子上的小图："不指定"是原图，"随机大师"是骰子。
+    private func photographerTile(_ p: StudioModel.Option) -> some View {
+        let image: UIImage? = p.id == "random" ? nil : model.thumbs[p.id == "none" ? "original" : "p.\(p.id)"]
+        return PickTile(title: StudioIcons.photographerName(p), image: image,
+                        symbol: p.id == "random" ? "dice.fill" : "camera.aperture", tint: .purple,
+                        selected: model.photographer == p.id) { model.photographer = p.id }
+    }
+
+    /// 器材格子：胶片和相机是套了色调的小图；"自动""随机"是图标。
+    private func equipmentTile(_ e: StudioModel.Option) -> some View {
+        let symbol = e.id == "random" ? "dice.fill" : (e.id == "auto" ? "wand.and.stars" : "film.fill")
+        return PickTile(title: StudioIcons.equipmentName(e), image: model.thumbs["e.\(e.id)"], symbol: symbol, tint: .purple,
+                        selected: model.equipment == e.id) { model.equipment = e.id }
+    }
+
     private var cameraPanel: some View {
         VStack(spacing: 10) {
-            ChipRow(items: CameraGroup.list(model.subject),
-                    title: { $0 == .brands && !model.brands.isEmpty ? "\($0.title) \(model.brands.count)" : $0.title },
-                    isSelected: { cameraGroup == $0 }) { cameraGroup = $0 }
+            SymbolChipRow(items: CameraGroup.list(model.subject),
+                          title: { $0 == .brands && !model.brands.isEmpty ? "\($0.title) \(model.brands.count)" : $0.title },
+                          symbol: { StudioIcons.cameraGroupSymbol($0.rawValue) },
+                          isSelected: { cameraGroup == $0 }) { cameraGroup = $0 }
             switch cameraGroup {
             case .photographer:
-                ChipRow(items: model.catalog.photographers, title: { $0.title }, isSelected: { model.photographer == $0.id }) { model.photographer = $0.id }
+                TileRow(items: model.catalog.photographers) { photographerTile($0) }
             case .equipment:
-                ChipRow(items: model.catalog.equipment, title: { $0.title }, isSelected: { model.equipment == $0.id }) { model.equipment = $0.id }
+                TileRow(items: model.catalog.equipment) { equipmentTile($0) }
             case .time:
-                ChipRow(items: model.catalog.timeOfDay, title: { $0.title }, isSelected: { model.timeOfDay == $0.id }) { model.timeOfDay = $0.id }
+                TileRow(items: model.catalog.timeOfDay) { t in
+                    let look = StudioIcons.lightSymbol(t.id)
+                    PickTile(title: StudioIcons.plain(t.title), symbol: look.0, tint: look.1,
+                             selected: model.timeOfDay == t.id) { model.timeOfDay = t.id }
+                }
             case .brands:
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(model.catalog.brands.indices, id: \.self) { index in
-                            Chip(title: model.catalog.brands[index].title, selected: model.brandCategoryIndex == index) {
+                            let title = model.catalog.brands[index].title
+                            Chip(title: StudioIcons.plain(title), symbol: StudioIcons.brandCategorySymbol(title),
+                                 selected: model.brandCategoryIndex == index) {
                                 model.brandCategoryIndex = index
                             }
                         }
                     }
                 }
                 if model.catalog.brands.indices.contains(model.brandCategoryIndex) {
-                    ChipRow(items: model.catalog.brands[model.brandCategoryIndex].items, title: { $0.title },
-                            isSelected: { model.brands.contains($0.id) }) { toggle(&model.brands, $0.id) }
+                    SymbolChipRow(items: model.catalog.brands[model.brandCategoryIndex].items, title: { $0.title },
+                                  symbol: { StudioIcons.brandItemSymbol($0, category: model.catalog.brands[model.brandCategoryIndex].title) },
+                                  isSelected: { model.brands.contains($0.id) }) { toggle(&model.brands, $0.id) }
+                        .id(model.brandCategoryIndex)
                 }
             }
         }
     }
 
-    /// 拍场景：时间、天气、季节、光线，每组第一项都是"保持原样"。
+    /// 拍场景：时间、天气、季节、光线，每组第一项都是"保持原样"（用原图做缩略图）。
     private var moodPanel: some View {
         VStack(spacing: 10) {
-            ChipRow(items: SceneLook.Group.allCases, title: { group in
+            SymbolChipRow(items: SceneLook.Group.allCases, title: { group in
                 let picked = group.option(model.scenePicks[group])
                 return picked.id == SceneLook.keep ? group.title : "\(group.title) · \(picked.title)"
-            }, isSelected: { moodGroup == $0 }) { moodGroup = $0 }
-            ChipRow(items: moodGroup.options, title: { $0.title },
-                    isSelected: { moodGroup.option(model.scenePicks[moodGroup]).id == $0.id }) {
-                model.scenePicks[moodGroup] = $0.id
+            }, symbol: { StudioIcons.moodGroupSymbol($0) }, isSelected: { moodGroup == $0 }) { moodGroup = $0 }
+            TileRow(items: moodGroup.options) { option in
+                let look = StudioIcons.lightSymbol(option.id)
+                PickTile(title: option.title, image: option.id == SceneLook.keep ? model.thumbs["original"] : nil,
+                         symbol: look.0, tint: look.1,
+                         selected: moodGroup.option(model.scenePicks[moodGroup]).id == option.id) {
+                    model.scenePicks[moodGroup] = option.id
+                }
             }
+            .id(moodGroup)
         }
     }
 
@@ -399,8 +429,8 @@ struct StudioView: View {
                 Spacer()
                 ProviderMenu(openSettings: { showSettings = true }, compact: true)
             }
-            ChipRow(items: StudioScene.variations, title: { $0.title },
-                    isSelected: { model.sceneVariations.contains($0.id) }) { model.toggleSceneVariation($0.id) }
+            SymbolChipRow(items: StudioScene.variations, title: { $0.title }, symbol: { StudioIcons.variationSymbols[$0.id] },
+                          isSelected: { model.sceneVariations.contains($0.id) }) { model.toggleSceneVariation($0.id) }
             HStack(spacing: 10) {
                 Button { model.start(explore: false) } label: {
                     Label("开始拍 \(model.sceneCount) 张", systemImage: "camera.fill")
