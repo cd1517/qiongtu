@@ -268,7 +268,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def log(self, provider, prompt=""):
         p = (prompt or "").replace("\n", " ")
-        print(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?')[0]} [{provider}] {p[:60]}", flush=True)
+        # MOCK_AI_FULL=1 时打出完整指令（查拼接出来的指令对不对）
+        if not os.environ.get("MOCK_AI_FULL"):
+            p = p[:60]
+        print(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?')[0]} [{provider}] {p}", flush=True)
 
     # 工具
 

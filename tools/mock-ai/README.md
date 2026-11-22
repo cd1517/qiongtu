@@ -9,7 +9,7 @@
 ## 启动
 
 ```bash
-python3 tools/mock-ai/server.py          # 监听 0.0.0.0:8765，换端口用 MOCK_AI_PORT=xxxx
+python3 tools/mock-ai/server.py          # 监听 0.0.0.0:8765，换端口用 MOCK_AI_PORT=xxxx；MOCK_AI_FULL=1 打出完整指令
 ```
 
 每个请求在终端打一行：时间、方法、路径、服务商、提示词前 60 个字。不打印 Authorization / Key。
