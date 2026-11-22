@@ -136,6 +136,22 @@ final class StudioModel {
             isLoading = false
             return
         }
+        await loadImage(image)
+    }
+
+    /// 从文件打开（Mac 上从访达选图 / 拖拽走这里）。
+    func load(fileURL: URL) async {
+        let scoped = fileURL.startAccessingSecurityScopedResource()
+        defer { if scoped { fileURL.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: fileURL), let image = UIImage(data: data) else {
+            errorText = "无法读取这张图片"
+            isLoading = false
+            return
+        }
+        await loadImage(image)
+    }
+
+    private func loadImage(_ image: UIImage) async {
         let photo = AIOneShot.prepared(image, maxSide: 2048)
         subject = await SubjectMode.detect(in: photo)
         original = photo
