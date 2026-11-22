@@ -14,11 +14,12 @@ jobs:
 
       - name: Build (Mac Catalyst)
         run: |
+          set -o pipefail
           xcodebuild -project XiuTu.xcodeproj -scheme XiuTu \
             -configuration Release \
             -destination 'platform=macOS,variant=Mac Catalyst' \
             -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO build | tail -30
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -150
 
       - name: Package (ad-hoc 签名 + 打包)
         run: |
