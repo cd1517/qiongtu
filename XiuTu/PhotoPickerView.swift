@@ -1,13 +1,16 @@
 import Photos
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 相册选图：点缩略图直接进编辑，点右下角的小按钮先放大预览。
 struct PhotoPickerView: View {
     var onPick: (String) -> Void
+    var onPickFile: (URL) -> Void = { _ in }
     var onClose: () -> Void
 
     @State private var library = PhotoLibrary()
     @State private var preview: PreviewStart?
+    @State private var importingFile = false
 
     private struct PreviewStart: Identifiable {
         let id: Int
@@ -26,6 +29,9 @@ struct PhotoPickerView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
+        .fileImporter(isPresented: $importingFile, allowedContentTypes: [.image]) { result in
+            if case .success(let url) = result { onPickFile(url) }
+        }
         .task { await library.requestAccess() }
         .fullScreenCover(item: $preview) { start in
             PreviewPager(library: library, startIndex: start.id) { id in
@@ -60,6 +66,13 @@ struct PhotoPickerView: View {
                         .frame(width: 44, height: 44)
                 }
                 Spacer()
+                Button { importingFile = true } label: {
+                    Image(systemName: "folder")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("从文件打开")
             }
         }
         .padding(.horizontal, 8)
