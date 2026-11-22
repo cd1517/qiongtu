@@ -35,6 +35,8 @@ class AIEdit(
     val reframed: Boolean = false,
     /** 预览时拖滑块会反复新建这一步：笔画没变就沿用上一次画好的蒙版。 */
     shared: AIEdit? = null,
+    /** 0...1，把 AI 结果过头的锐化压下去，在本机调。 */
+    val soften: Float = 0f,
 ) : EditOp {
     val strokes: List<MosaicStroke> = strokes.map { it.copy() }
 
@@ -72,7 +74,9 @@ class AIEdit(
             val k = max(w, h).toFloat() / max(result.width, result.height)
             val ow = (result.width * k).roundToInt().coerceAtLeast(1)
             val oh = (result.height * k).roundToInt().coerceAtLeast(1)
-            return if (k < 1f) Img.scaled(Img.downscale(result, max(ow, oh)), ow, oh) else Img.scaled(result, ow, oh)
+            val out = if (k < 1f) Img.scaled(Img.downscale(result, max(ow, oh)), ow, oh) else Img.scaled(result, ow, oh)
+            if (soften <= 0.005f) return out
+            return Gpu.run { read(softened(this, upload(out), soften, max(ow, oh).toFloat())) }
         }
         // 结果贴到哪一块（像素，原点左上）
         val t = frame?.let { floatArrayOf(it.left * w, it.top * h, it.width() * w, it.height() * h) }
@@ -91,6 +95,14 @@ class AIEdit(
                 val placed = pass(AIShaders.PLACE, mapOf("res" to r), mapOf("rect" to t), w, h)
                 fg = ToneTransfer.apply(this, s, placed)
                 place = floatArrayOf(0f, 0f, w.toFloat(), h.toFloat())
+            }
+            if (soften > 0.005f) {
+                // 柔化按贴上去之后的大小算半径：先摆到整张画布上再模糊
+                if (fg === r) {
+                    fg = pass(AIShaders.PLACE, mapOf("res" to r), mapOf("rect" to t), w, h)
+                    place = floatArrayOf(0f, 0f, w.toFloat(), h.toFloat())
+                }
+                fg = softened(this, fg, soften, max(t[2], t[3]))
             }
             var mode = 0
             var maskTex = s
@@ -117,6 +129,22 @@ class AIEdit(
             read(out)
         }
     }
+
+    companion object {
+        /**
+         * AI 出图常常锐化过头：和模糊过的自己混一下，边缘的白边和沙沙的纹理就下去了。
+         * dim = 结果贴上去之后的长边，和 r 用同一种像素单位。
+         */
+        fun softened(g: GpuScope, r: Tex, amount: Float, dim: Float = max(r.width, r.height).toFloat()): Tex {
+            if (amount <= 0.005f) return r
+            // Core Image 的模糊半径约等于 σ；Gpu.blur 的半径是 2.5σ
+            val blurred = g.blur(r, dim * (0.0006f + 0.0012f * amount) * 2.5f)
+            return g.pass(
+                AIShaders.SOFT_MIX, mapOf("src" to r, "fg" to blurred), mapOf("t" to min(1f, amount * 0.9f)),
+                r.width, r.height,
+            )
+        }
+    }
 }
 
 /**
@@ -124,9 +152,10 @@ class AIEdit(
  * 比较"AI 图"和"原图"各自模糊之后的样子，得到每个位置的增益，再乘回原图。
  */
 object ToneTransfer {
-    fun apply(g: GpuScope, original: Tex, graded: Tex): Tex {
+    /** radius（σ，像素）不给就用长边的 1.2%（修逆光这类要跟着局部光影走）；给大半径就只跟整体的明暗冷暖。 */
+    fun apply(g: GpuScope, original: Tex, graded: Tex, radius: Float? = null): Tex {
         // Core Image 的模糊半径约等于 σ；Gpu.blur 的半径是 2.5σ
-        val radius = max(original.width, original.height) * 0.012f * 2.5f
+        val radius = (radius ?: (max(original.width, original.height) * 0.012f)) * 2.5f
         val bo = g.blur(original, radius)
         val br = g.blur(graded, radius)
         return g.pass(AIShaders.TONE_GAIN, mapOf("src" to original, "bo" to bo, "br" to br), width = original.width, height = original.height)
@@ -221,6 +250,18 @@ void main() {
     m *= strength;
     vec3 c = toSrgb(mix(toLin(a.rgb), toLin(b.rgb), m));
     o = vec4(c, mix(a.a, b.a, m));
+}
+"""
+
+    /** 和模糊过的自己混合（线性光）。 */
+    const val SOFT_MIX = Shaders.HEADER + LINEAR + """
+uniform sampler2D src;
+uniform sampler2D fg;
+uniform float t;
+void main() {
+    vec4 a = texture(src, uv);
+    vec4 b = texture(fg, uv);
+    o = vec4(toSrgb(mix(toLin(a.rgb), toLin(b.rgb), t)), mix(a.a, b.a, t));
 }
 """
 

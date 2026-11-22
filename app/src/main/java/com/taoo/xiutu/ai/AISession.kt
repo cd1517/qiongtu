@@ -92,6 +92,12 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
         private set
     var strength by mutableFloatStateOf(1f)
         private set
+    /** 柔化：压 AI 结果过头的锐化。整张重画的结果默认 30。 */
+    var soften by mutableFloatStateOf(0.3f)
+        private set
+    /** 当前结果是图层 AI 融合来的（不能"再生成一次"）。 */
+    var resultFused by mutableStateOf(false)
+        private set
     /** 当前指令是不是"没涂抹就自动只处理头部"的那一类（修跑焦）。 */
     private var faceCrop = false
     /** 美发：没涂抹时自动找到人脸，把头和头发这一大块发给 AI。 */
@@ -203,8 +209,10 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
     /** 当前这次 AI 结果对应的编辑步骤；还没有结果时是 null。 */
     private fun currentEdit(): AIEdit? {
         val r = result ?: return null
-        if (resultReframed) return AIEdit(r, emptyList(), reframed = true)
-        val e = AIEdit(r, strokes, frame, ellipse, strength, toneOnly, shared = lastEdit?.takeIf { it.result === r })
+        // 柔化只给整张重画的结果用；局部贴回的不柔化。
+        val soft = if (frame == null && !hasRegion) soften else 0f
+        if (resultReframed) return AIEdit(r, emptyList(), reframed = true, soften = soft)
+        val e = AIEdit(r, strokes, frame, ellipse, strength, toneOnly, shared = lastEdit?.takeIf { it.result === r }, soften = soft)
         lastEdit = e
         return e
     }
@@ -231,6 +239,28 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
 
     fun updateStrength(value: Float) {
         strength = value.coerceIn(0f, 1f)
+        render()
+    }
+
+    fun updateSoften(value: Float) {
+        soften = value.coerceIn(0f, 1f)
+        render()
+    }
+
+    /** 图层融合完：结果放进结果面板，可以调强度和柔化，点 ✓ 才算数。 */
+    fun showFusedResult(image: Bitmap) {
+        if (closed) return
+        cancelAI()
+        error = null
+        usageText = null
+        frame = null
+        ellipse = null
+        resultReframed = false
+        toneOnly = false
+        result = image
+        hasResult = true
+        resultFused = true
+        soften = 0.35f
         render()
     }
 
@@ -438,6 +468,7 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
         error = null
         result = null
         hasResult = false
+        resultFused = false
         usageText = null
         AIClient.takeLastUsage()
         running = true
@@ -635,7 +666,7 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
                 Text(it, fontSize = 11.sp, color = Theme.accent, modifier = Modifier.fillMaxWidth())
             }
             // 改形状的（美体、美发）没有"只取光影"这回事。
-            if (!group.isHair && group != AIPresetGroup.BODY && !resultReframed) {
+            if (!group.isHair && group != AIPresetGroup.BODY && !resultReframed && !resultFused) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("只取光影色彩", toneOnly) { setToneOnlyMode(true) }
                     Chip("完整采用 AI 图", !toneOnly) { setToneOnlyMode(false) }
@@ -651,8 +682,16 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
                     )
                 }
             }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("柔化", fontSize = 13.sp, color = Theme.dim)
+                XSlider(soften, { updateSoften(it) }, 0f..1f, Modifier.weight(1f))
+                Text(
+                    "${(soften * 100).roundToInt()}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White,
+                    textAlign = TextAlign.End, modifier = Modifier.width(34.dp),
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                WideButton("再生成一次", "arrow.clockwise", "AI", Modifier.weight(1f)) { runAI() }
+                if (!resultFused) WideButton("再生成一次", "arrow.clockwise", "AI", Modifier.weight(1f)) { runAI() }
                 WideButton("不要了，换一个", "arrow.uturn.backward", null, Modifier.weight(1f)) { discardResult() }
             }
         }

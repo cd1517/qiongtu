@@ -40,6 +40,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.taoo.xiutu.core.Img
 import com.taoo.xiutu.editor.ZoomableCanvas
+import com.taoo.xiutu.tools.beauty.FavoriteFaceStore
 import com.taoo.xiutu.ui.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -380,6 +381,13 @@ private fun HistoryViewer(item: HistoryItem, onEdit: (File) -> Unit, onClose: ()
                     }
                 }
                 IconTile("square.and.arrow.up", "分享") { share(context, item, file) }
+                IconTile("star", "满意脸型") {
+                    scope.launch {
+                        val data = withContext(Dispatchers.IO) { runCatching { file.readBytes() }.getOrNull() }
+                        val ok = data != null && FavoriteFaceStore.add(context, data)
+                        note = if (ok) "已设为满意脸型" else "这张图里没有找到人脸"
+                    }
+                }
                 IconTile("trash", "删除") { confirmDelete = true }
             }
         }

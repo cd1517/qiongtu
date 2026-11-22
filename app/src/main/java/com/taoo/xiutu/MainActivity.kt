@@ -24,6 +24,8 @@ import com.taoo.xiutu.manga.MangaScreen
 import com.taoo.xiutu.picker.PhotoPickerScreen
 import com.taoo.xiutu.raw.RawScreen
 import com.taoo.xiutu.studio.StudioScreen
+import com.taoo.xiutu.tools.beauty.FavoriteFaceScreen
+import com.taoo.xiutu.tools.beauty.FavoriteFaceStore
 import com.taoo.xiutu.ui.XiuTuTheme
 import java.io.File
 
@@ -33,6 +35,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         AISettings.init(applicationContext)
         HistoryStore.init(applicationContext)
+        FavoriteFaceStore.init(applicationContext)
         setContent { XiuTuTheme { AppNav() } }
     }
 }
@@ -52,6 +55,7 @@ fun AppNav() {
                 startManga = { nav.navigate("manga") },
                 startHistory = { nav.navigate("history") },
                 startRaw = { nav.navigate("raw") },
+                startFavorite = { nav.navigate("favoriteFace") },
             )
         }
         composable("picker/{target}/{tool}") { e ->
@@ -90,6 +94,7 @@ fun AppNav() {
         composable("raw") {
             RawScreen(onEdit = { f -> nav.navigate("editorFile/${enc(f.absolutePath)}") }, onClose = { nav.popHome() })
         }
+        composable("favoriteFace") { FavoriteFaceScreen { nav.popHome() } }
         composable("manga") { MangaScreen { nav.popHome() } }
         composable("history") {
             HistoryScreen(onEdit = { f -> nav.navigate("editorFile/${enc(f.absolutePath)}") }, onClose = { nav.popHome() })

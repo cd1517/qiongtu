@@ -331,4 +331,5 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "figure.stand.dress" to Icons.Filled.Woman,
     "mouth" to Icons.Filled.Mood,
     "heart.circle" to Icons.Filled.VolunteerActivism,
+    "star" to Icons.Outlined.StarOutline,
 )
