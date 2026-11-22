@@ -59,6 +59,8 @@ class GodCoverEngine(context: Context) {
         }
     }
 
+    private var page: ByteArray? = null
+
     init {
         val html = runCatching {
             context.assets.open("godcover/engine.html.gcweb").use { it.readBytes().decodeToString() }
@@ -76,6 +78,14 @@ class GodCoverEngine(context: Context) {
             isClickable = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
             addJavascriptInterface(Bridge(), "__gcNative")
+            webChromeClient = object : android.webkit.WebChromeClient() {
+                override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                    if (m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) {
+                        android.util.Log.w("GodCover", "网页：" + m.message() + " @" + m.lineNumber())
+                    }
+                    return true
+                }
+            }
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse =
                     intercept(request)
@@ -83,12 +93,15 @@ class GodCoverEngine(context: Context) {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = true
 
                 override fun onPageFinished(view: WebView?, url: String?) {
+                    if (url?.startsWith(GodCoverFonts.BASE) != true) return
                     ready.complete(Unit)
                 }
             }
         }
         if (html != null) {
-            webView.loadDataWithBaseURL(GodCoverFonts.BASE, fonts?.patch(html) ?: html, "text/html", "utf-8", null)
+            // 页面本身也由拦截器给出（同源），不用 loadDataWithBaseURL：那条路会转成 data: 地址，超过 2MB 上限就加载不出来
+            page = (fonts?.patch(html) ?: html).toByteArray(Charsets.UTF_8)
+            webView.loadUrl(GodCoverFonts.BASE + "index.html")
         } else {
             ready.completeExceptionally(IllegalStateException("封面引擎文件缺失"))
         }
@@ -102,6 +115,10 @@ class GodCoverEngine(context: Context) {
         val url = request?.url ?: return empty()
         if (url.scheme != "https" || url.host != GodCoverFonts.HOST) return empty()
         val seg = url.pathSegments
+        if (seg.size == 1 && seg[0] == "index.html") {
+            val data = page ?: return empty(404, "Not Found")
+            return WebResourceResponse("text/html", "utf-8", 200, "OK", emptyMap(), ByteArrayInputStream(data))
+        }
         if (seg.size == 2 && seg[0] == "f") {
             val n = seg[1].toIntOrNull()
             return n?.let { runCatching { fonts?.response(it) }.getOrNull() } ?: empty(404, "Not Found")

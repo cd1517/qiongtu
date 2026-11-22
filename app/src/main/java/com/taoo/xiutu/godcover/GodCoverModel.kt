@@ -142,7 +142,8 @@ class GodCoverModel(private val context: Context) {
                 engine.setPhoto(false, jpeg)
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                android.util.Log.w("GodCover", "引擎启动失败", e)
                 errorText = "封面引擎没有启动成功"
                 isLoading = false
                 return@launch
