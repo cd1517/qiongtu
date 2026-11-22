@@ -329,4 +329,18 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "window.casement" to Icons.Filled.Window,
     "lightbulb.led.fill" to Icons.Filled.Highlight,
     "figure.stand.dress" to Icons.Filled.Woman,
+    // 美体
+    "figure.cooldown" to Icons.Filled.SelfImprovement,
+    "figure.dance" to Icons.Filled.SportsGymnastics,
+    "figure.strengthtraining.traditional" to Icons.Filled.FitnessCenter,
+    "circle.bottomhalf.filled" to Icons.Filled.Tonality,
+    "figure.stand.line.dotted.figure.stand" to Icons.Filled.Accessibility,
+    "arrow.left.and.right" to Icons.Filled.SwapHoriz,
+    "rectangle.tophalf.inset.filled" to Icons.Filled.WebAsset,
+    "heart" to Icons.Outlined.FavoriteBorder,
+    "oval.portrait" to Icons.Outlined.Egg,
+    "bandage" to Icons.Filled.Healing,
+    "chevron.up" to Icons.Filled.KeyboardArrowUp,
+    "arrow.triangle.2.circlepath" to Icons.Filled.Autorenew,
+    "lock.rectangle" to Icons.Filled.Lock,
 )
