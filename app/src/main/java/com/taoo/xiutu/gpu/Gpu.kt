@@ -31,6 +31,9 @@ object Gpu {
     private var quad: FloatBuffer? = null
     var maxTextureSize = 4096
         private set
+    /** 能否渲染到半精度浮点纹理（RGBA16F）。不能时 emptyFloat 退回 RGBA8。 */
+    var floatRenderable = false
+        private set
 
     const val VERTEX = """#version 300 es
 in vec2 pos;
@@ -90,6 +93,10 @@ void main() {
         val m = IntArray(1)
         GLES30.glGetIntegerv(GLES30.GL_MAX_TEXTURE_SIZE, m, 0)
         maxTextureSize = m[0].coerceAtLeast(2048)
+        val ext = GLES30.glGetString(GLES30.GL_EXTENSIONS) ?: ""
+        val ver = GLES30.glGetString(GLES30.GL_VERSION) ?: ""
+        floatRenderable = "GL_EXT_color_buffer_float" in ext || "GL_EXT_color_buffer_half_float" in ext ||
+            Regex("""OpenGL ES 3\.[2-9]""").containsMatchIn(ver)
         quad = ByteBuffer.allocateDirect(8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
             put(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)); position(0)
         }
@@ -137,7 +144,7 @@ void main() {
 }
 
 /** 一张 GPU 纹理。只在创建它的 run 块里有效。 */
-class Tex internal constructor(val id: Int, val width: Int, val height: Int)
+class Tex internal constructor(val id: Int, val width: Int, val height: Int, val float: Boolean = false)
 
 /** run 块里可用的操作。块结束时这次创建的纹理全部释放。 */
 class GpuScope internal constructor() {
@@ -174,11 +181,51 @@ class GpuScope internal constructor() {
         return Tex(id, b.width, b.height)
     }
 
+<<<<<<< HEAD
     /** 提前释放这次 run 里创建的一张纹理（长链条逐层叠加时省显存）。之后不能再用它。 */
     fun release(tex: Tex) {
         if (textures.remove(tex.id)) GLES30.glDeleteTextures(1, intArrayOf(tex.id), 0)
     }
 
+=======
+    /** 新建一张空的半精度浮点纹理（RGBA16F，可超过 1、可为负）。设备不支持渲染到浮点纹理时退回 RGBA8。 */
+    fun emptyFloat(width: Int, height: Int): Tex {
+        if (!Gpu.floatRenderable) return empty(width, height)
+        val id = newTexture(width, height)
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F, width, height, 0, GLES30.GL_RGBA, GLES30.GL_HALF_FLOAT, null)
+        return Tex(id, width, height, true)
+    }
+
+    /**
+     * 上传半精度浮点数据（每像素 channels 个 half，行优先，第一行 = 图片第一行）。
+     * 可以只取其中一块：整张宽 rowLength，从 (x, y) 起取 width × height。
+     */
+    fun uploadHalf(data: java.nio.Buffer, width: Int, height: Int, channels: Int = 3, rowLength: Int = width, x: Int = 0, y: Int = 0): Tex {
+        val id = newTexture(width, height)
+        val (internal, format) = when (channels) {
+            1 -> GLES30.GL_R16F to GLES30.GL_RED
+            2 -> GLES30.GL_RG16F to GLES30.GL_RG
+            3 -> GLES30.GL_RGB16F to GLES30.GL_RGB
+            else -> GLES30.GL_RGBA16F to GLES30.GL_RGBA
+        }
+        data.position(0)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 2)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_ROW_LENGTH, rowLength)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_SKIP_PIXELS, x)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_SKIP_ROWS, y)
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, internal, width, height, 0, format, GLES30.GL_HALF_FLOAT, data)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 4)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_ROW_LENGTH, 0)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_SKIP_PIXELS, 0)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_SKIP_ROWS, 0)
+        return Tex(id, width, height, true)
+    }
+
+    /** 跑一遍着色器，输出到半精度浮点纹理（见 emptyFloat）。 */
+    fun passFloat(frag: String, inputs: Map<String, Tex>, uniforms: Map<String, Any> = emptyMap(), width: Int, height: Int): Tex =
+        pass(frag, inputs, uniforms, width, height, float = true)
+
+>>>>>>> p2-raw
     /** 新建一张空纹理（RGBA8）。 */
     fun empty(width: Int, height: Int): Tex {
         val id = newTexture(width, height)
@@ -191,8 +238,8 @@ class GpuScope internal constructor() {
      * uniforms 支持 Float / Int / Boolean / FloatArray(1-4 或 9/16 当矩阵) / List<Float>。
      * 自动提供 `vec2 size`（输出像素尺寸）；每个输入纹理 X 还会提供 `vec2 X_size`。用到而没声明的会自动补声明。
      */
-    fun pass(frag: String, inputs: Map<String, Tex>, uniforms: Map<String, Any> = emptyMap(), width: Int, height: Int): Tex {
-        val out = empty(width, height)
+    fun pass(frag: String, inputs: Map<String, Tex>, uniforms: Map<String, Any> = emptyMap(), width: Int, height: Int, float: Boolean = false): Tex {
+        val out = if (float) emptyFloat(width, height) else empty(width, height)
         val p = Gpu.program(frag)
         if (fbo[0] == 0) GLES30.glGenFramebuffers(1, fbo, 0)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbo[0])
@@ -238,8 +285,9 @@ class GpuScope internal constructor() {
         return out
     }
 
-    /** 读回成 Bitmap。 */
+    /** 读回成 Bitmap。浮点纹理先转成 RGBA8（超出 0...1 的截断）。 */
     fun read(tex: Tex): Bitmap {
+        if (tex.float) return read(pass(Shaders.COPY, mapOf("src" to tex), emptyMap(), tex.width, tex.height))
         if (fbo[0] == 0) GLES30.glGenFramebuffers(1, fbo, 0)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbo[0])
         GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, tex.id, 0)
@@ -262,13 +310,15 @@ class GpuScope internal constructor() {
         while (r > 24f && input.width > 32 && input.height > 32) {
             val w = (input.width / 2).coerceAtLeast(1)
             val h = (input.height / 2).coerceAtLeast(1)
-            input = pass(Shaders.COPY, mapOf("src" to input), emptyMap(), w, h)
+            input = pass(Shaders.COPY, mapOf("src" to input), emptyMap(), w, h, src.float)
             r /= 2f
             scale *= 2f
         }
-        val h1 = pass(Shaders.BLUR, mapOf("src" to input), mapOf("dir" to floatArrayOf(1f, 0f), "radius" to r), input.width, input.height)
-        val v1 = pass(Shaders.BLUR, mapOf("src" to h1), mapOf("dir" to floatArrayOf(0f, 1f), "radius" to r), input.width, input.height)
-        return if (scale == 1f) v1 else pass(Shaders.COPY, mapOf("src" to v1), emptyMap(), src.width, src.height)
+        // 浮点纹理模糊后仍是浮点
+        val f = src.float
+        val h1 = pass(Shaders.BLUR, mapOf("src" to input), mapOf("dir" to floatArrayOf(1f, 0f), "radius" to r), input.width, input.height, f)
+        val v1 = pass(Shaders.BLUR, mapOf("src" to h1), mapOf("dir" to floatArrayOf(0f, 1f), "radius" to r), input.width, input.height, f)
+        return if (scale == 1f) v1 else pass(Shaders.COPY, mapOf("src" to v1), emptyMap(), src.width, src.height, f)
     }
 }
 

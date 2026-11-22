@@ -394,4 +394,13 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "arrow.right" to Icons.AutoMirrored.Filled.ArrowForward,
     // 美妆
     "hand.raised.fingers.spread" to Icons.Filled.FrontHand,
+    // RAW 冲洗
+    "square.grid.3x3" to Icons.Filled.GridOn,
+    "waveform" to Icons.Filled.GraphicEq,
+    "circle.righthalf.filled" to Icons.Filled.Contrast,
+    "square.stack.3d.up" to Icons.Filled.Layers,
+    "point.topleft.down.curvedto.point.bottomright.up" to Icons.Filled.ShowChart,
+    "moon.haze" to Icons.Filled.NightsStay,
+    "scalemass" to Icons.Filled.Balance,
+    "folder" to Icons.Filled.Folder,
 )
