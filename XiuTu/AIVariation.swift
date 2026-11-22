@@ -1,0 +1,59 @@
+import Foundation
+
+/// "再生成一次"：图像接口大多没有随机种子，同一句指令出来的图几乎一样。
+/// 所以重新生成时在指令后面随机加几条"这次换个方向"的要求，让每一版有明显区别。
+enum AIVariation {
+    /// 画风类（创意玩法）：可以大胆换。
+    private static let creative = [
+        "换一套完全不同的配色方案",
+        "换一个时间段的光线（清晨、正午、黄昏或夜晚任选其一，和上一版不同）",
+        "线条换一种粗细和质感",
+        "上色方式换一种（平涂、渐变、厚涂、水彩感任选，和上一版不同）",
+        "背景的细节重新设计，加入不一样的小元素",
+        "整体氛围换一种情绪（更明快、更安静、更浪漫或更戏剧化）",
+        "画风在同一大类里换一个流派",
+        "光影对比更强烈一些",
+        "颜色更柔和淡雅一些",
+        "颜色更鲜艳饱和一些",
+        "人物的表情和神态换一种细微变化",
+    ]
+
+    /// 调色调光类（大师、相机、光线）：换一种诠释，构图和人不动。
+    private static let tone = [
+        "换一种色彩诠释，冷暖倾向和上一版不同",
+        "反差换一种处理（更柔或更硬，和上一版不同）",
+        "光线的方向和软硬换一种",
+        "暗部和高光的色彩倾向换一种",
+        "饱和度换一个取向",
+        "整体明暗基调换一种（更亮或更暗，和上一版不同）",
+    ]
+
+    /// 其余：在保持原意的前提下换个处理思路。
+    private static let general = [
+        "换一种处理思路，结果和上一版要有区别",
+        "细节的处理换一种方式",
+        "颜色和光影的处理换一种方式",
+        "处理的力度和上一版不同",
+    ]
+
+    /// 第几次重新生成（从 1 开始）对应的附加要求。
+    static func clause(for group: AIPresetGroup, round: Int) -> String {
+        let pool: [String]
+        switch group {
+        case .creative: pool = creative
+        case .master, .camera, .light: pool = tone
+        default: pool = general
+        }
+        let picks = Array(pool.shuffled().prefix(group == .creative ? 3 : 2))
+        let keep: String
+        switch group {
+        case .creative:
+            keep = "人物要认得出是同一个人，画面比例不变。"
+        case .fix, .remove, .compose, .body, .hairStyle, .hairColor, .hairCare:
+            keep = "原来的要求全部照旧，人物长相不变。"
+        default:
+            keep = "人物长相和构图不变。"
+        }
+        return "\n\n这是第 \(round + 1) 次生成，上一版不满意。这次要和上一版有明显区别：" + picks.joined(separator: "；") + "。" + keep
+    }
+}

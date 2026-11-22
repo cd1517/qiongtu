@@ -100,6 +100,9 @@ final class EditorModel {
     var aiStrength: CGFloat = 1
     /// 柔化：压 AI 结果过头的锐化。整张重画的结果默认 30。
     var aiSoften: CGFloat = 0
+    /// 同一条指令点了几次"再生成一次"；每次在指令后面加不同的变化要求，避免出来的图都一样。
+    @ObservationIgnored private var aiRegenRound = 0
+    @ObservationIgnored private var aiLastPrompt = ""
     /// 当前结果是图层 AI 融合来的（不能"再生成一次"）。
     private(set) var aiResultFused = false
     /// 当前指令是不是"没涂抹就自动只处理头部"的那一类（修跑焦）。
@@ -1144,12 +1147,16 @@ final class EditorModel {
 
     /// 把当前画面和指令发给选中的服务商。
     func runAI() {
-        let prompt = aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard tool == .ai, !aiRunning else { return }
-        guard !prompt.isEmpty else {
+        guard !base.isEmpty else {
             aiError = "先写一句要怎么改，或者点上面的快捷指令。"
             return
         }
+        // 结果出来后再点同一条：算重新生成，加上这一轮的变化要求。
+        aiRegenRound = aiHasResult && base == aiLastPrompt ? aiRegenRound + 1 : 0
+        aiLastPrompt = base
+        let prompt = aiRegenRound > 0 ? base + AIVariation.clause(for: aiGroup, round: aiRegenRound) : base
         aiEllipse = nil
         aiResultReframed = false
         if aiGroup == .compose, aiReframe != .original {
