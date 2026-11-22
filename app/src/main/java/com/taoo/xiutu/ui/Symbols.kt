@@ -429,4 +429,9 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "tree" to Icons.Filled.Park,
     "rectangle.split.3x1" to Icons.Filled.ViewColumn,
     "building.2" to Icons.Filled.Apartment,
+    // 特效
+    "sparkles.rectangle.stack" to Icons.Filled.AutoAwesomeMotion,
+    "circle.slash" to Icons.Filled.Block,
+    "sunset.fill" to Icons.Filled.WbTwilight,
+    "moon.circle.fill" to Icons.Filled.Brightness2,
 )

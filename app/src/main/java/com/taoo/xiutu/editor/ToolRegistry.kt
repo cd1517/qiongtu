@@ -4,6 +4,7 @@ import com.taoo.xiutu.ai.AISession
 import com.taoo.xiutu.tools.adjust.AdjustSession
 import com.taoo.xiutu.tools.beauty.BeautySession
 import com.taoo.xiutu.tools.collage.CollageSession
+import com.taoo.xiutu.tools.effect.EffectSession
 import com.taoo.xiutu.tools.crop.CropSession
 import com.taoo.xiutu.tools.doodle.DoodleSession
 import com.taoo.xiutu.tools.filter.FilterSession
@@ -36,6 +37,7 @@ object ToolRegistry {
         Tool.COLLAGE -> CollageSession(model)
         Tool.DOODLE, Tool.MARK -> DoodleSession(model, t)
         Tool.FRAME, Tool.BACKDROP -> FrameSession(model, t)
+        Tool.EFFECT -> EffectSession(model)
     }
 
     fun available(t: Tool) = true

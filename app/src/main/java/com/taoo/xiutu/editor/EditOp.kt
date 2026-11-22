@@ -24,6 +24,7 @@ enum class Tool(val title: String, val symbol: String) {
     MAKEUP("美妆", "paintbrush.pointed"),
     SKIN("皮肤", "sparkle"),
     SHAPE("塑形", "figure.arms.open"),
+    EFFECT("特效", "sparkles.rectangle.stack"),
 }
 
 /**

@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,6 +22,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -33,7 +36,7 @@ import kotlinx.coroutines.launch
 /** 底部一级菜单。 */
 enum class MainTab(val title: String, val directTool: Tool? = null) {
     TOOLS("工具"), BEAUTY("美颜"), BODY("美体"), HAIR("美发"),
-    FILTER("滤镜", Tool.FILTER), ADJUST("调色", Tool.ADJUST), DECO("装饰"), AI("AI 修图");
+    FILTER("滤镜", Tool.FILTER), EFFECT("特效", Tool.EFFECT), ADJUST("调色", Tool.ADJUST), DECO("装饰"), AI("AI 修图");
 }
 
 /** 二级菜单里点了之后做什么。 */
@@ -81,7 +84,7 @@ fun MainTab.entries(): List<MenuEntry> {
             MenuEntry(Tool.BACKDROP), MenuEntry(Tool.MARK), MenuEntry(Tool.MOSAIC),
         )
         MainTab.AI -> AIPresetGroup.editGroups.map { MenuEntry(it.menuTitle, it.symbol, "AI", MenuAction.OpenAI(it)) }
-        MainTab.FILTER, MainTab.ADJUST -> emptyList()
+        MainTab.FILTER, MainTab.EFFECT, MainTab.ADJUST -> emptyList()
     }
     return list.filter { e ->
         when (val a = e.action) {
@@ -346,7 +349,12 @@ private fun MainMenu(tab: MainTab, onTab: (MainTab) -> Unit, onEntry: (MenuActio
                     Modifier.weight(1f).fillMaxHeight().tap { item.directTool?.let { onEntry(MenuAction.OpenTool(it)) } ?: onTab(item) },
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
                 ) {
-                    Text(item.title, fontSize = 15.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = if (on) Theme.accent else Color.White, maxLines = 1, softWrap = false)
+                    // 九个一级菜单在窄屏上放不下时字号自动缩小一点（iOS 的 minimumScaleFactor 0.8）
+                    BasicText(
+                        item.title, maxLines = 1, softWrap = false,
+                        style = TextStyle(fontSize = 15.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = if (on) Theme.accent else Color.White),
+                        autoSize = TextAutoSize.StepBased(minFontSize = 12.sp, maxFontSize = 15.sp, stepSize = 0.5.sp),
+                    )
                     Spacer(Modifier.height(6.dp))
                     Box(Modifier.size(18.dp, 3.dp).clip(CircleShape).background(if (on) Theme.accent else Color.Transparent))
                 }
