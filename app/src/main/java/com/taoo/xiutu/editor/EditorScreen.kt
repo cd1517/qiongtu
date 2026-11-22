@@ -179,8 +179,8 @@ private fun TopBar(model: EditorModel, isSaved: Boolean, saving: Boolean, onBack
                 Spacer(Modifier.width(8.dp))
             }
             Box(
-                Modifier.clip(CircleShape).background(Color.White).alpha(if (model.isLoading || saving) 0.4f else 1f)
-                    .press(!model.isLoading && !saving, onSave).padding(horizontal = 18.dp, vertical = 8.dp),
+                Modifier.clip(CircleShape).background(if (model.isLoading || saving) Color.White.copy(alpha = 0.4f) else Color.White)
+                    .tap(!model.isLoading && !saving, onSave).padding(horizontal = 18.dp, vertical = 8.dp),
             ) { Text("保存", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.Black) }
         }
     }
