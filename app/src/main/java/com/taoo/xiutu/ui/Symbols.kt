@@ -329,4 +329,14 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "window.casement" to Icons.Filled.Window,
     "lightbulb.led.fill" to Icons.Filled.Highlight,
     "figure.stand.dress" to Icons.Filled.Woman,
+    // RAW 冲洗
+    "square.grid.3x3" to Icons.Filled.GridOn,
+    "circle.grid.3x3" to Icons.Filled.Apps,
+    "waveform" to Icons.Filled.GraphicEq,
+    "circle.righthalf.filled" to Icons.Filled.Contrast,
+    "square.stack.3d.up" to Icons.Filled.Layers,
+    "point.topleft.down.curvedto.point.bottomright.up" to Icons.Filled.ShowChart,
+    "moon.haze" to Icons.Filled.NightsStay,
+    "scalemass" to Icons.Filled.Balance,
+    "folder" to Icons.Filled.Folder,
 )
