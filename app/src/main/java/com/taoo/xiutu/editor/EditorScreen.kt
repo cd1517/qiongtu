@@ -41,7 +41,12 @@ sealed interface MenuAction {
     data class OpenTool(val tool: Tool) : MenuAction
     data class OpenAI(val group: AIPresetGroup) : MenuAction
     data object Erase : MenuAction
+    /** 打开工具后再切到指定的做法（美颜的 AI / 手动，美体塑形的各种模式）。 */
+    data class ToolMode(val tool: Tool, val mode: String) : MenuAction
 }
+
+/** 工具里有几种做法、要从菜单直接进到某一种时实现它。 */
+interface ModeSelectable { fun selectMode(mode: String) }
 
 class MenuEntry(val title: String, val symbol: String, val badge: String? = null, val action: MenuAction) {
     constructor(tool: Tool) : this(tool.title, tool.symbol, null, MenuAction.OpenTool(tool))
@@ -55,9 +60,18 @@ fun MainTab.entries(): List<MenuEntry> {
             MenuEntry("消除", "eraser", "AI", MenuAction.Erase),
             MenuEntry(Tool.COLLAGE), MenuEntry(Tool.LAYERS),
         )
-        MainTab.BEAUTY -> listOf(MenuEntry(Tool.BEAUTY), MenuEntry(Tool.RESHAPE), MenuEntry(Tool.MAKEUP), MenuEntry(Tool.SKIN))
+        MainTab.BEAUTY -> listOf(
+            MenuEntry("一键美颜", "sparkles", "AI", MenuAction.ToolMode(Tool.BEAUTY, "ai")),
+            MenuEntry(Tool.RESHAPE), MenuEntry(Tool.MAKEUP), MenuEntry(Tool.SKIN),
+            MenuEntry("手动美颜", "slider.horizontal.3", null, MenuAction.ToolMode(Tool.BEAUTY, "manual")),
+        )
         MainTab.BODY -> listOf(
-            MenuEntry(Tool.SHAPE), MenuEntry("推拉", "hand.draw", null, MenuAction.OpenTool(Tool.LIQUIFY)),
+            MenuEntry("一键美体", "figure.stand", null, MenuAction.ToolMode(Tool.SHAPE, "preset")),
+            MenuEntry("塑形", "figure.arms.open", null, MenuAction.ToolMode(Tool.SHAPE, "shape")),
+            MenuEntry("增高", "arrow.up.and.down", null, MenuAction.ToolMode(Tool.SHAPE, "tall")),
+            MenuEntry("瘦身", "arrow.right.and.line.vertical.and.arrow.left", null, MenuAction.ToolMode(Tool.SHAPE, "slim")),
+            MenuEntry("缩放", "circle.dashed", null, MenuAction.ToolMode(Tool.SHAPE, "zoom")),
+            MenuEntry("推拉", "hand.draw", null, MenuAction.OpenTool(Tool.LIQUIFY)),
             MenuEntry("AI 美体", "sparkles", "AI", MenuAction.OpenAI(AIPresetGroup.BODY)),
         )
         MainTab.HAIR -> AIPresetGroup.hairGroups.map { MenuEntry(it.title, it.symbol, "AI", MenuAction.OpenAI(it)) }
@@ -68,7 +82,13 @@ fun MainTab.entries(): List<MenuEntry> {
         MainTab.AI -> AIPresetGroup.editGroups.map { MenuEntry(it.menuTitle, it.symbol, "AI", MenuAction.OpenAI(it)) }
         MainTab.FILTER, MainTab.ADJUST -> emptyList()
     }
-    return list.filter { e -> (e.action as? MenuAction.OpenTool)?.let { ToolRegistry.available(it.tool) } ?: true }
+    return list.filter { e ->
+        when (val a = e.action) {
+            is MenuAction.OpenTool -> ToolRegistry.available(a.tool)
+            is MenuAction.ToolMode -> ToolRegistry.available(a.tool)
+            else -> true
+        }
+    }
 }
 
 @Composable
@@ -115,6 +135,7 @@ fun EditorScreen(model: EditorModel, initialTool: Tool?, onClose: () -> Unit) {
                     is MenuAction.OpenTool -> start(action.tool)
                     is MenuAction.OpenAI -> model.beginAI(action.group)
                     MenuAction.Erase -> model.beginAI(AIPresetGroup.REMOVE, AIPresetGroup.REMOVE.presets.first().prompt)
+                    is MenuAction.ToolMode -> model.open(action.tool) { s -> (s as? ModeSelectable)?.selectMode(action.mode) }
                 }
             })
         }

@@ -85,6 +85,7 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "camera.viewfinder" to Icons.Filled.CenterFocusStrong,
     "camera.filters" to Icons.Filled.FilterVintage,
     // 工具
+    "arrow.up.and.down" to Icons.Filled.Height,
     "crop" to Icons.Filled.Crop,
     "crop.rotate" to Icons.Filled.CropRotate,
     "rotate.right" to Icons.AutoMirrored.Filled.RotateRight,

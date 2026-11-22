@@ -29,6 +29,7 @@ fun HomeScreen(
     startStudio: () -> Unit,
     startManga: () -> Unit,
     startHistory: () -> Unit,
+    startRaw: () -> Unit,
 ) {
     var showSettings by remember { mutableStateOf(false) }
     val shortcuts = listOf(Tool.CROP, Tool.FILTER, Tool.ADJUST, Tool.MOSAIC)
@@ -58,6 +59,7 @@ fun HomeScreen(
                 Text("开始编辑", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.Black)
             }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                FeatureButton("camera.filters", "RAW 冲洗", action = startRaw)
                 FeatureButton("crown.fill", "封神", action = startCover)
                 FeatureButton("camera.aperture", "摄影棚", action = startStudio)
                 FeatureButton("book.pages.fill", "漫画人生", action = startManga)

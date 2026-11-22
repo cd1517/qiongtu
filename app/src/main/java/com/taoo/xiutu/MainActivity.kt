@@ -22,6 +22,7 @@ import com.taoo.xiutu.history.HistoryStore
 import com.taoo.xiutu.home.HomeScreen
 import com.taoo.xiutu.manga.MangaScreen
 import com.taoo.xiutu.picker.PhotoPickerScreen
+import com.taoo.xiutu.raw.RawScreen
 import com.taoo.xiutu.studio.StudioScreen
 import com.taoo.xiutu.ui.XiuTuTheme
 import java.io.File
@@ -50,6 +51,7 @@ fun AppNav() {
                 startStudio = { nav.navigate("picker/studio/none") },
                 startManga = { nav.navigate("manga") },
                 startHistory = { nav.navigate("history") },
+                startRaw = { nav.navigate("raw") },
             )
         }
         composable("picker/{target}/{tool}") { e ->
@@ -84,6 +86,9 @@ fun AppNav() {
         }
         composable("studio/{uri}") { e ->
             StudioScreen(Uri.parse(e.arguments?.getString("uri"))) { nav.popBackStack() }
+        }
+        composable("raw") {
+            RawScreen(onEdit = { f -> nav.navigate("editorFile/${enc(f.absolutePath)}") }, onClose = { nav.popHome() })
         }
         composable("manga") { MangaScreen { nav.popHome() } }
         composable("history") {
