@@ -127,6 +127,13 @@ struct AIPanel: View {
                     }
                 }
             }
+            if model.aiGroup == .master {
+                HStack(spacing: 8) {
+                    Chip(title: "大师构图", symbol: "viewfinder", selected: model.aiMasterCompose) { model.aiMasterCompose = true }
+                    Chip(title: "原构图", symbol: "rectangle", selected: !model.aiMasterCompose) { model.aiMasterCompose = false }
+                    Spacer(minLength: 0)
+                }
+            }
             if model.aiGroup == .compose {
                 // 构图可以换画幅：横图改竖图、竖图改横图。
                 HStack(spacing: 8) {
@@ -196,6 +203,7 @@ struct AIPanel: View {
     private func start(_ preset: AIPreset) {
         model.aiError = nil
         model.aiPrompt = preset.prompt
+        model.aiPresetTitle = preset.title
         model.aiFaceCrop = preset.faceCrop
         model.aiHairCrop = preset.hairCrop
         model.aiToneOnly = preset.toneOnly
@@ -205,6 +213,7 @@ struct AIPanel: View {
     private func custom() {
         model.aiError = nil
         model.aiPrompt = ""
+        model.aiPresetTitle = ""
         model.aiFaceCrop = false
         model.aiHairCrop = model.aiGroup.isHair
         model.aiToneOnly = false

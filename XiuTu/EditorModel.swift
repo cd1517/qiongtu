@@ -103,6 +103,10 @@ final class EditorModel {
     /// 同一条指令点了几次"再生成一次"；每次在指令后面加不同的变化要求，避免出来的图都一样。
     @ObservationIgnored private var aiRegenRound = 0
     @ObservationIgnored private var aiLastPrompt = ""
+    /// 大师风格：除了色彩，也按大师的习惯重新构图（默认开）。
+    var aiMasterCompose = true
+    /// 最近点的那个快捷指令的名字（大师构图按名字找取景方式）。
+    var aiPresetTitle = ""
     /// 当前结果是图层 AI 融合来的（不能"再生成一次"）。
     private(set) var aiResultFused = false
     /// 当前指令是不是"没涂抹就自动只处理头部"的那一类（修跑焦）。
@@ -433,6 +437,7 @@ final class EditorModel {
         commitTool { [self] in
             beginAI(group: group, prompt: preset.prompt)
             guard tool == .ai else { return }
+            aiPresetTitle = preset.title
             aiFaceCrop = preset.faceCrop
             aiHairCrop = preset.hairCrop
             aiToneOnly = preset.toneOnly
@@ -1156,9 +1161,18 @@ final class EditorModel {
         // 结果出来后再点同一条：算重新生成，加上这一轮的变化要求。
         aiRegenRound = aiHasResult && base == aiLastPrompt ? aiRegenRound + 1 : 0
         aiLastPrompt = base
-        let prompt = aiRegenRound > 0 ? base + AIVariation.clause(for: aiGroup, round: aiRegenRound) : base
         aiEllipse = nil
         aiResultReframed = false
+        if aiGroup == .master, aiMasterCompose, let recomposed = MasterCompose.prompt(base, title: aiPresetTitle) {
+            // 大师构图：整张交给 AI 重新取景，不看涂抹；结果和原图对不齐，按换过构图处理。
+            let prompt = aiRegenRound > 0
+                ? recomposed + AIVariation.clause(for: aiGroup, round: aiRegenRound, recompose: true) : recomposed
+            aiFrame = nil
+            aiToneOnly = false
+            launchAI(prompt: prompt, strokes: [], crop: nil, guidance: false, identity: true, recomposed: true)
+            return
+        }
+        let prompt = aiRegenRound > 0 ? base + AIVariation.clause(for: aiGroup, round: aiRegenRound) : base
         if aiGroup == .compose, aiReframe != .original {
             // 换画幅：整张交给 AI 重新构图，不看涂抹。
             aiFrame = nil
@@ -1286,7 +1300,7 @@ final class EditorModel {
 
     /// identity = true：必须还是同一个人的任务。画质设成"自动"时改用高画质，并要求尽量忠实于原图。
     private func launchAI(prompt: String, strokes: [MosaicStroke], crop: CGRect?, guidance: Bool, identity: Bool = false,
-                          reframe: AIReframe = .original, references: [UIImage] = []) {
+                          reframe: AIReframe = .original, references: [UIImage] = [], recomposed: Bool = false) {
         guard let proxy, let started = tool else { return }
         guard var endpoint = AISettings.shared.endpoint() else {
             aiError = "还没有设置 \(AISettings.shared.active.shortTitle) 的 API Key。"
@@ -1317,7 +1331,7 @@ final class EditorModel {
                 guard let self, !Task.isCancelled, self.tool == started else { return }
                 self.aiUsageText = usage?.summary
                 self.aiResult = image
-                self.aiResultReframed = reframe != .original
+                self.aiResultReframed = reframe != .original || recomposed
                 self.aiHasResult = true
                 self.aiRunning = false
                 if started == .beauty, let key = self.pendingFaceKey, let frame = self.aiFrame, let ellipse = self.aiEllipse {
