@@ -23,12 +23,12 @@ jobs:
 
       - name: Package (ad-hoc 签名 + 打包)
         run: |
-          cd build/Build/Products/Release
+          cd build/Build/Products/Release-maccatalyst
           codesign --force --deep -s - XiuTu.app
           zip -qry XiuTu-Mac.zip XiuTu.app
 
       - uses: actions/upload-artifact@v4
         with:
           name: XiuTu-Mac
-          path: build/Build/Products/Release/XiuTu-Mac.zip
+          path: build/Build/Products/Release-maccatalyst/XiuTu-Mac.zip
           retention-days: 30
