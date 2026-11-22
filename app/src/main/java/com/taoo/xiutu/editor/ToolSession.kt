@@ -22,6 +22,12 @@ abstract class ToolSession(val model: EditorModel, val tool: Tool) {
     /** 确认时要加入历史的步骤；空列表 = 什么都没改。 */
     abstract fun commitOps(): List<EditOp>
 
+    /**
+     * 确认时把整串历史换成这一串（图层工具原地修改历史中间的那一步时用）。
+     * null = 照常把 commitOps() 追加到历史后面。
+     */
+    open fun replacementOps(): List<EditOp>? = null
+
     /** 还在处理中（比如 AI 正在生成）：这时点确认不生效。 */
     open val busy: Boolean get() = false
 

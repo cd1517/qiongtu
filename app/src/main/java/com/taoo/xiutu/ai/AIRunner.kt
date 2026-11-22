@@ -58,7 +58,7 @@ object AIRunner {
         endpoint0: AIEndpoint, prompt: String, proxy: Bitmap, ops: List<EditOp>,
         strokes: List<MosaicStroke>, crop: RectF? = null, appendGuidance: Boolean = true,
         reframe: AIReframe = AIReframe.ORIGINAL,
-        /** 附带的参考图（比如满意脸型），跟在主图后面发。 */
+        /** 附带的参考图（满意脸型、图层融合），跟在主图后面一起发。 */
         references: List<Bitmap> = emptyList(),
     ): Bitmap {
         var endpoint = endpoint0
@@ -104,7 +104,9 @@ object AIRunner {
                     mask = withContext(Dispatchers.Default) { maskPNG(strokes, tw, th, content) }
                     request += " Apply the change only inside the masked (transparent) area and blend it seamlessly with the surroundings."
                 }
-                val extras = withContext(Dispatchers.Default) { references.map { Img.png(AIOneShot.prepared(it, 1024)) } }
+                val extras = if (references.isEmpty()) emptyList() else withContext(Dispatchers.Default) {
+                    references.map { Img.png(AIOneShot.prepared(it, 1024)) }
+                }
                 val payload = AIPayload(request, png, "image/png", maskPNG = mask, markedJPEG = null, size = "${tw}x$th", extraImages = extras)
                 val data = AIClient.edit(endpoint, payload)
                 return withContext(Dispatchers.Default) {
@@ -154,7 +156,9 @@ object AIRunner {
             }
             jpeg to marked
         }
-        val extras = withContext(Dispatchers.Default) { references.map { Img.jpeg(AIOneShot.prepared(it, 1024), 92) } }
+        val extras = if (references.isEmpty()) emptyList() else withContext(Dispatchers.Default) {
+            references.map { Img.jpeg(AIOneShot.prepared(it, 1024), 92) }
+        }
         if (marked != null) {
             text += " The second image is the same photo with the region to edit highlighted in red. Change only that region, and return the first photo edited, without any red marking."
         }
