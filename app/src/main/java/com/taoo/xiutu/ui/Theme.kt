@@ -1,5 +1,11 @@
 package com.taoo.xiutu.ui
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import android.graphics.Bitmap
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
@@ -188,20 +194,58 @@ fun ImageTile(
 
 /** 一排等宽的分段标签，选中的那格是白底。 */
 @Composable
-fun <T> SegmentBar(items: List<T>, selected: T, title: (T) -> String, symbol: ((T) -> String)? = null, onSelect: (T) -> Unit) {
-    Row(Modifier.fillMaxWidth().clip(CircleShape).background(Theme.chip).padding(3.dp)) {
-        for (item in items) {
-            val on = item == selected
-            Row(
-                Modifier.weight(1f).heightIn(min = 32.dp).clip(CircleShape).background(if (on) Color.White else Color.Transparent).tap { onSelect(item) },
-                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val fg = if (on) Color.Black else Color.White
-                if (symbol != null) {
-                    Icon(sym(symbol(item)), null, tint = fg, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                }
-                Text(title(item), fontSize = 14.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, color = fg, maxLines = 1)
+fun <T> SegmentBar(
+    items: List<T>, selected: T, title: (T) -> String, symbol: ((T) -> String)? = null,
+    /** 放不下时改成可以左右滑，每格按内容宽度排。 */
+    scrolls: Boolean = false,
+    onSelect: (T) -> Unit,
+) {
+    @Composable
+    fun Cell(item: T, modifier: Modifier, inner: androidx.compose.ui.unit.Dp = 0.dp) {
+        val on = item == selected
+        Row(
+            modifier.heightIn(min = 32.dp).clip(CircleShape)
+                .background(if (on) Color.White else Color.Transparent).tap { onSelect(item) }.padding(horizontal = inner),
+            horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val fg = if (on) Color.Black else Color.White
+            if (symbol != null) {
+                Icon(sym(symbol(item)), null, tint = fg, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+            }
+            Text(title(item), fontSize = 14.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, color = fg, maxLines = 1)
+        }
+    }
+    if (!scrolls) {
+        Row(Modifier.fillMaxWidth().clip(CircleShape).background(Theme.chip).padding(3.dp)) {
+            for (item in items) Cell(item, Modifier.weight(1f))
+        }
+        return
+    }
+    // 可以滑：选中的那格自动滑到中间
+    val scroll = androidx.compose.foundation.rememberScrollState()
+    val spans = androidx.compose.runtime.remember { HashMap<Int, IntRange>() }
+    var width by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val index = items.indexOf(selected)
+    androidx.compose.runtime.LaunchedEffect(index, width) {
+        val s = spans[index] ?: return@LaunchedEffect
+        val target = ((s.first + s.last) / 2 - width / 2).coerceIn(0, scroll.maxValue)
+        scroll.animateScrollTo(target)
+    }
+    Box(
+        Modifier.fillMaxWidth().clip(CircleShape).background(Theme.chip)
+            .onSizeChanged { width = it.width },
+    ) {
+        Row(Modifier.horizontalScroll(scroll).padding(3.dp)) {
+            items.forEachIndexed { i, item ->
+                Cell(
+                    item,
+                    Modifier.onGloballyPositioned { c ->
+                        val x = c.positionInParent().x.toInt()
+                        spans[i] = x..(x + c.size.width)
+                    },
+                    10.dp,
+                )
             }
         }
     }

@@ -388,7 +388,7 @@ class LayerSession(model: EditorModel) : ToolSession(model, Tool.LAYERS) {
                         (model.begin(Tool.AI) as? com.taoo.xiutu.ai.AISession)?.showFusedResult(final)
                     }
                 } else {
-                    model.replaceOps(pre + stack + AIEdit(final, emptyList(), soften = 0.35f) + suf)
+                    model.replaceOps(pre + stack + AIEdit(final, emptyList(), soften = 0f) + suf)
                 }
             } catch (e: CancellationException) {
                 throw e

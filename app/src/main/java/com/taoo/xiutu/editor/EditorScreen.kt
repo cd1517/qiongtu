@@ -121,9 +121,15 @@ fun EditorScreen(
     }
     DisposableEffect(Unit) { onDispose { model.dispose() } }
 
+    /** 正常离开编辑器：草稿用不着了。 */
+    fun leave() {
+        model.discardDraft()
+        onClose()
+    }
+
     fun tryClose() {
         val changed = if (embedded) model.hasChanges else model.hasEdits
-        if (changed && !isSaved) confirmDiscard = true else onClose()
+        if (changed && !isSaved) confirmDiscard = true else leave()
     }
     BackHandler {
         when {
@@ -192,7 +198,7 @@ fun EditorScreen(
         AlertDialog(
             onDismissRequest = { confirmDiscard = false },
             title = { Text("放弃当前修改？") },
-            confirmButton = { TextButton({ confirmDiscard = false; onClose() }) { Text("放弃修改", color = Theme.red) } },
+            confirmButton = { TextButton({ confirmDiscard = false; leave() }) { Text("放弃修改", color = Theme.red) } },
             dismissButton = { TextButton({ confirmDiscard = false }) { Text("继续编辑", color = Color.White) } },
             containerColor = Theme.panel,
         )

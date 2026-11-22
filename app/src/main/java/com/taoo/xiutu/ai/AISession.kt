@@ -92,9 +92,18 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
         private set
     var strength by mutableFloatStateOf(1f)
         private set
-    /** 柔化：压 AI 结果过头的锐化。整张重画的结果默认 30。 */
-    var soften by mutableFloatStateOf(0.3f)
+    /** 柔化：压 AI 结果过头的锐化。 */
+    var soften by mutableFloatStateOf(0f)
         private set
+    /** 同一条指令点了几次"再生成一次"；每次在指令后面加不同的变化要求，避免出来的图都一样。 */
+    private var regenRound = 0
+    private var lastPrompt = ""
+    /** 大师风格：除了色彩，也按大师的习惯重新构图（默认开）。 */
+    var masterCompose by mutableStateOf(true)
+    /** 最近点的那个快捷指令的名字（大师构图按名字找取景方式）。 */
+    private var presetTitle = ""
+    /** 创意玩法里选中的那一类。 */
+    private var creativeKind by mutableStateOf(CreativeKind.COMIC)
     /** 当前结果是图层 AI 融合来的（不能"再生成一次"）。 */
     var resultFused by mutableStateOf(false)
         private set
@@ -142,6 +151,12 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
             toneThumbs = withContext(Dispatchers.Default) {
                 runCatching { com.taoo.xiutu.tools.filter.MasterPreview.thumbs(b, titles) }.getOrDefault(emptyMap())
             }
+            // 创意玩法：本机能大致模拟的画风算一张小图
+            val small = photoThumb ?: return@launch
+            val creative = withContext(Dispatchers.Default) {
+                CreativeKind.all.mapNotNull { p -> runCatching { CreativePreview.render(p.title, small) }.getOrNull()?.let { p.title to it } }.toMap()
+            }
+            if (!closed) toneThumbs = toneThumbs + creative
         }
     }
 
@@ -154,6 +169,7 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
     override fun setup(group: AIPresetGroup, prompt: String, preset: AIPreset?, run: Boolean) {
         this.group = group
         this.prompt = prompt
+        presetTitle = preset?.title ?: ""
         reframe = AIReframe.ORIGINAL
         faceCrop = preset?.faceCrop ?: false
         hairCrop = preset?.hairCrop ?: false
@@ -260,7 +276,7 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
         result = image
         hasResult = true
         resultFused = true
-        soften = 0.35f
+        soften = 0f
         render()
     }
 
@@ -282,14 +298,27 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
 
     /** 把当前画面和指令发给选中的服务商。 */
     fun runAI() {
-        val p = prompt.trim()
+        val basePrompt = prompt.trim()
         if (closed || running) return
-        if (p.isEmpty()) {
+        if (basePrompt.isEmpty()) {
             error = "先写一句要怎么改，或者点上面的快捷指令。"
             return
         }
+        // 结果出来后再点同一条：算重新生成，加上这一轮的变化要求。
+        regenRound = if (hasResult && basePrompt == lastPrompt) regenRound + 1 else 0
+        lastPrompt = basePrompt
         ellipse = null
         resultReframed = false
+        val recomposed = if (group == AIPresetGroup.MASTER && masterCompose) MasterCompose.prompt(basePrompt, presetTitle) else null
+        if (recomposed != null) {
+            // 大师构图：整张交给 AI 重新取景，不看涂抹；结果和原图对不齐，按换过构图处理。
+            val rp = if (regenRound > 0) recomposed + AIVariation.clause(group, regenRound, recompose = true) else recomposed
+            frame = null
+            toneOnly = false
+            launchAI(rp, emptyList(), null, guidance = false, identity = true, recomposed = true)
+            return
+        }
+        val p = if (regenRound > 0) basePrompt + AIVariation.clause(group, regenRound) else basePrompt
         if (group == AIPresetGroup.COMPOSE && reframe != AIReframe.ORIGINAL) {
             // 换画幅：整张交给 AI 重新构图，不看涂抹。
             frame = null
@@ -450,7 +479,7 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
     /** identity = true：必须还是同一个人的任务。画质设成"自动"时改用高画质，并要求尽量忠实于原图。 */
     private fun launchAI(
         prompt: String, strokes: List<MosaicStroke>, crop: RectF?, guidance: Boolean,
-        identity: Boolean = false, reframe: AIReframe = AIReframe.ORIGINAL,
+        identity: Boolean = false, reframe: AIReframe = AIReframe.ORIGINAL, recomposed: Boolean = false,
     ) {
         if (closed) return
         val proxy = model.proxy ?: return
@@ -483,10 +512,11 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
                 if (closed || gen != generation) return@launch
                 usageText = usage?.summary
                 result = image
-                resultReframed = reframe != AIReframe.ORIGINAL
+                resultReframed = reframe != AIReframe.ORIGINAL || recomposed
                 hasResult = true
                 running = false
                 render()
+                model.saveDraft()
             } catch (e: CancellationException) {
                 if (gen == generation) running = false
                 throw e
@@ -560,7 +590,7 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
                 }
                 else -> {
                     Box(Modifier.weight(1f)) {
-                        SegmentBar(AIPresetGroup.editGroups, group, { it.title }, { it.symbol }) { group = it }
+                        SegmentBar(AIPresetGroup.editGroups, group, { it.title }, { it.symbol }, scrolls = true) { group = it }
                     }
                     ProviderMenu(::openSettings, iconOnly = true)
                 }
@@ -574,6 +604,19 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
         val master = group.usesTonePreview
         val pictures = master || group == AIPresetGroup.HAIR_STYLE
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (group == AIPresetGroup.CREATIVE) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (kind in CreativeKind.entries) {
+                        Chip(kind.title, selected = creativeKind == kind, symbol = kind.symbol) { creativeKind = kind }
+                    }
+                }
+            }
+            if (group == AIPresetGroup.MASTER) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("大师构图", selected = masterCompose, symbol = "viewfinder") { masterCompose = true }
+                    Chip("原构图", selected = !masterCompose, symbol = "rectangle") { masterCompose = false }
+                }
+            }
             if (group == AIPresetGroup.COMPOSE) {
                 // 构图可以换画幅
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -582,15 +625,18 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
                     }
                 }
             }
-            key(group) {
+            key(group, if (group == AIPresetGroup.CREATIVE) creativeKind else null) {
                 Row(
                     Modifier.bleed(16.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 6.dp, bottom = 2.dp),
                     horizontalArrangement = Arrangement.spacedBy(if (pictures) 10.dp else 4.dp),
                     verticalAlignment = Alignment.Top,
                 ) {
-                    for (preset in group.presets) {
+                    val list = if (group == AIPresetGroup.CREATIVE) creativeKind.presets else group.presets
+                    for (preset in list) {
                         val tint = preset.tint
                         when {
+                            group == AIPresetGroup.CREATIVE && toneThumbs[preset.title] == null ->
+                                CreativeArtTile(preset.title, preset.symbol, creativeKind) { start(preset) }
                             master -> ImageTile(preset.title, toneThumbs[preset.title] ?: photoThumb, symbol = group.symbol, badge = "AI") { start(preset) }
                             tint != null -> ColorTile(tint, preset.title) { start(preset) }
                             group == AIPresetGroup.HAIR_STYLE ->
@@ -619,6 +665,7 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
     private fun start(preset: AIPreset) {
         error = null
         prompt = preset.prompt
+        presetTitle = preset.title
         faceCrop = preset.faceCrop
         hairCrop = preset.hairCrop
         toneOnly = preset.toneOnly
@@ -628,6 +675,7 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
     private fun custom() {
         error = null
         prompt = ""
+        presetTitle = ""
         faceCrop = false
         hairCrop = group.isHair
         toneOnly = false
@@ -666,7 +714,7 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
                 Text(it, fontSize = 11.sp, color = Theme.accent, modifier = Modifier.fillMaxWidth())
             }
             // 改形状的（美体、美发）没有"只取光影"这回事。
-            if (!group.isHair && group != AIPresetGroup.BODY && !resultReframed && !resultFused) {
+            if (!group.isHair && group != AIPresetGroup.BODY && group != AIPresetGroup.CREATIVE && !resultReframed && !resultFused) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("只取光影色彩", toneOnly) { setToneOnlyMode(true) }
                     Chip("完整采用 AI 图", !toneOnly) { setToneOnlyMode(false) }
@@ -753,5 +801,25 @@ fun ColorTile(hex: Int, title: String, onClick: () -> Unit) {
             CornerBadge("AI", Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-4).dp))
         }
         Text(title, fontSize = 11.5.sp, color = Color.White, maxLines = 1)
+    }
+}
+
+/** 创意玩法里本机模拟不了的那些（加分身、加东西、换场景）：色块渐变 + 图标。 */
+@Composable
+private fun CreativeArtTile(title: String, symbol: String, kind: CreativeKind, onClick: () -> Unit) {
+    val colors = when (kind) {
+        CreativeKind.COMIC -> listOf(Color(0.98f, 0.55f, 0.62f), Color(0.5f, 0.36f, 0.85f))
+        CreativeKind.CARTOON -> listOf(Color(1f, 0.78f, 0.35f), Color(0.98f, 0.45f, 0.5f))
+        CreativeKind.ART -> listOf(Color(0.45f, 0.7f, 0.85f), Color(0.25f, 0.3f, 0.55f))
+        CreativeKind.TWIN -> listOf(Color(0.55f, 0.85f, 0.8f), Color(0.3f, 0.45f, 0.8f))
+        CreativeKind.FUN -> listOf(Color(1f, 0.6f, 0.3f), Color(0.85f, 0.25f, 0.45f))
+        CreativeKind.MOOD -> listOf(Color(0.95f, 0.7f, 0.45f), Color(0.35f, 0.25f, 0.5f))
+    }
+    Column(Modifier.width(68.dp).press(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(68.dp, 84.dp).clip(RoundedCornerShape(10.dp)).background(Brush.linearGradient(colors)), contentAlignment = Alignment.Center) {
+            Icon(sym(symbol), null, tint = Color.White, modifier = Modifier.size(28.dp))
+            CornerBadge("AI", Modifier.align(Alignment.TopEnd).padding(4.dp))
+        }
+        Text(title, fontSize = 12.sp, color = Color.White, maxLines = 1)
     }
 }

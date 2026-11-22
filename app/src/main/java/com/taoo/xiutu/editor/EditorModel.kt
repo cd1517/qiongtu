@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.taoo.xiutu.ai.AIPreset
 import com.taoo.xiutu.ai.AIPresetGroup
+import com.taoo.xiutu.core.DraftStore
 import com.taoo.xiutu.core.Img
 import com.taoo.xiutu.core.Saver
 import com.taoo.xiutu.history.HistoryStore
@@ -19,6 +20,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -88,14 +90,20 @@ class EditorModel(val context: Context) {
 
     // MARK: 加载
 
-    fun load(uri: Uri) = loadWith { Img.decode(context, uri) }
+    fun load(uri: Uri) = loadWith {
+        if (draftEnabled) draftOriginal = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+        Img.decode(context, uri)
+    }
 
-    fun load(file: File) = loadWith { Img.decode(file) }
+    fun load(file: File) = loadWith {
+        if (draftEnabled) draftOriginal = runCatching { file.readBytes() }.getOrNull()
+        Img.decode(file)
+    }
 
     /** 从一张已经在内存里的图开始，并带上已有的修改步骤。 */
     fun load(image: Bitmap, initial: List<EditOp> = emptyList()) = loadWith(initial) { image }
 
-    private fun loadWith(initial: List<EditOp> = emptyList(), decode: () -> Bitmap?) {
+    private fun loadWith(initial: List<EditOp> = emptyList(), fromDraft: Boolean = false, decode: () -> Bitmap?) {
         scope.launch {
             val r = withContext(Dispatchers.Default) {
                 var full = decode() ?: return@withContext null
@@ -116,6 +124,12 @@ class EditorModel(val context: Context) {
             original = r.third
             displayImage = r.third
             ops = initial
+            if (fromDraft) {
+                // 草稿里的画面是第一步：撤销一步就回到原图
+                undoStates.add(emptyList())
+                undoCount = 1
+                revision++
+            }
             isLoading = false
             if (initial.isNotEmpty()) rebuildBase()
             onLoaded?.invoke()
@@ -140,6 +154,57 @@ class EditorModel(val context: Context) {
             displayImage = out
         }
         isBusy = false
+        saveDraft()
+    }
+
+    // MARK: 草稿箱
+
+    /** 这次编辑要不要自动存草稿（单独编辑图层时不存）。 */
+    var draftEnabled = false
+    /** 原图文件的数据，写草稿时一起存；null = 已经写过了或者没有。 */
+    @Volatile private var draftOriginal: ByteArray? = null
+    private var draftJob: Job? = null
+
+    /** 从草稿接着编辑：原图当底，草稿里的画面作为第一步。 */
+    fun loadDraft() {
+        scope.launch {
+            val snap = withContext(Dispatchers.IO) { runCatching { DraftStore.loadSnapshot() }.getOrNull() }
+            val file = DraftStore.originalFile
+            if (snap == null || !file.exists()) {
+                errorText = "草稿读不出来了"
+                isLoading = false
+                return@launch
+            }
+            // 原图已经在草稿里，不用再写一遍
+            draftOriginal = null
+            loadWith(listOf(com.taoo.xiutu.ai.AIEdit(snap, emptyList(), reframed = true)), fromDraft = true) { Img.decode(file) }
+        }
+    }
+
+    /** 停手一小会儿后，把当前画面（包括还没确认的 AI 结果）存进草稿箱。 */
+    fun saveDraft() {
+        val proxy = proxy ?: return
+        if (!draftEnabled) return
+        var all = ops
+        if (tool == Tool.AI) all = all + (runCatching { session?.commitOps() }.getOrNull() ?: emptyList())
+        if (all.isEmpty()) return
+        val original = draftOriginal
+        val token = DraftStore.token
+        draftJob?.cancel()
+        draftJob = scope.launch {
+            delay(600)
+            val wrote = withContext(Dispatchers.Default) {
+                runCatching { DraftStore.write(original, EditOp.applyAll(all, proxy), token) }.onFailure { it.printStackTrace() }.getOrDefault(false)
+            }
+            if (wrote && original != null && draftOriginal === original) draftOriginal = null
+        }
+    }
+
+    /** 正常离开编辑器：不用草稿了。 */
+    fun discardDraft() {
+        draftJob?.cancel()
+        draftJob = null
+        if (draftEnabled) DraftStore.clear()
     }
 
     // MARK: 工具进出

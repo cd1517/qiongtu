@@ -12,7 +12,21 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import com.taoo.xiutu.ai.AISettings
+import com.taoo.xiutu.core.DraftStore
+import com.taoo.xiutu.ui.Theme
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.taoo.xiutu.editor.EditorModel
 import com.taoo.xiutu.editor.EditorScreen
 import com.taoo.xiutu.editor.Tool
@@ -36,6 +50,7 @@ class MainActivity : ComponentActivity() {
         AISettings.init(applicationContext)
         HistoryStore.init(applicationContext)
         FavoriteFaceStore.init(applicationContext)
+        DraftStore.init(applicationContext)
         setContent { XiuTuTheme { AppNav() } }
     }
 }
@@ -46,6 +61,27 @@ private fun enc(s: String) = Uri.encode(s)
 @Composable
 fun AppNav() {
     val nav = rememberNavController()
+    // 启动时看看草稿箱：上次编辑到一半 App 退出了，就问要不要接着编辑
+    var draftChecked by rememberSaveable { mutableStateOf(false) }
+    var askDraft by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        if (draftChecked) return@LaunchedEffect
+        draftChecked = true
+        if (!DraftStore.exists) return@LaunchedEffect
+        askDraft = DraftStore.date?.let {
+            SimpleDateFormat("M月d日 HH:mm", Locale.CHINA).format(Date(it)) + " 编辑到一半的图，要接着编辑吗？"
+        } ?: "要接着编辑吗？"
+    }
+    askDraft?.let { message ->
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("上次有一张图还没编辑完") },
+            text = { Text(message) },
+            confirmButton = { TextButton({ askDraft = null; nav.navigate("draft") }) { Text("接着编辑", color = Color.White) } },
+            dismissButton = { TextButton({ askDraft = null; DraftStore.clear() }) { Text("不要了", color = Theme.red) } },
+            containerColor = Theme.panel,
+        )
+    }
     NavHost(nav, startDestination = "home") {
         composable("home") {
             HomeScreen(
@@ -76,13 +112,18 @@ fun AppNav() {
             val uri = Uri.parse(e.arguments?.getString("uri"))
             val tool = e.arguments?.getString("tool")?.let { n -> Tool.entries.firstOrNull { it.name == n } }
             val context = LocalContext.current
-            val model = remember { EditorModel(context).also { it.load(uri) } }
+            val model = remember { EditorModel(context).also { it.draftEnabled = true; it.load(uri) } }
             EditorScreen(model, tool) { nav.popBackStack() }
         }
         composable("editorFile/{path}") { e ->
             val file = File(e.arguments?.getString("path") ?: "")
             val context = LocalContext.current
-            val model = remember { EditorModel(context).also { it.load(file) } }
+            val model = remember { EditorModel(context).also { it.draftEnabled = true; it.load(file) } }
+            EditorScreen(model, null) { nav.popBackStack() }
+        }
+        composable("draft") {
+            val context = LocalContext.current
+            val model = remember { EditorModel(context).also { it.draftEnabled = true; it.loadDraft() } }
             EditorScreen(model, null) { nav.popBackStack() }
         }
         composable("cover/{uri}") { e ->
