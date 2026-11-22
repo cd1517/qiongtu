@@ -118,6 +118,8 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
     private var closed = false
     private var lastEdit: AIEdit? = null
     private var photoThumb by mutableStateOf<Bitmap?>(null)
+    /** 大师 / 相机 / 光线按钮上的小图：本机模拟的大致色调。 */
+    private var toneThumbs by mutableStateOf<Map<String, Bitmap>>(emptyMap())
     private val density = model.context.resources.displayMetrics.density
 
     private val hasRegion get() = strokes.any { !it.erase }
@@ -128,9 +130,12 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
     override fun start() {
         val b = model.base ?: return
         maskSet = MosaicMaskSet(b.width, b.height)
-        // TODO 合并后换成 MasterPreview：大师 / 相机 / 光线的按钮小图应是本机模拟的色调，现在先用当前照片缩略图占位
         model.scope.launch {
             photoThumb = withContext(Dispatchers.Default) { runCatching { Img.thumb(b, 260, 68f / 84f) }.getOrNull() }
+            val titles = AIPresetGroup.entries.filter { it.usesTonePreview }.flatMap { g -> g.presets.map { it.title } }
+            toneThumbs = withContext(Dispatchers.Default) {
+                runCatching { com.taoo.xiutu.tools.filter.MasterPreview.thumbs(b, titles) }.getOrDefault(emptyMap())
+            }
         }
     }
 
@@ -555,7 +560,7 @@ class AISession(model: EditorModel) : ToolSession(model, Tool.AI), AiToolApi {
                     for (preset in group.presets) {
                         val tint = preset.tint
                         when {
-                            master -> ImageTile(preset.title, photoThumb, symbol = group.symbol, badge = "AI") { start(preset) }
+                            master -> ImageTile(preset.title, toneThumbs[preset.title] ?: photoThumb, symbol = group.symbol, badge = "AI") { start(preset) }
                             tint != null -> ColorTile(tint, preset.title) { start(preset) }
                             group == AIPresetGroup.HAIR_STYLE ->
                                 ImageTile(preset.title, HairArt.image(preset.title), symbol = preset.symbol, badge = "AI") { start(preset) }
