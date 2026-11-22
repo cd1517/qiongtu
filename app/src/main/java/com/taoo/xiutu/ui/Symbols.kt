@@ -403,4 +403,9 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "moon.haze" to Icons.Filled.NightsStay,
     "scalemass" to Icons.Filled.Balance,
     "folder" to Icons.Filled.Folder,
+    // 特效
+    "sparkles.rectangle.stack" to Icons.Filled.AutoAwesomeMotion,
+    "circle.slash" to Icons.Filled.Block,
+    "sunset.fill" to Icons.Filled.WbTwilight,
+    "moon.circle.fill" to Icons.Filled.Brightness2,
 )
