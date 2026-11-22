@@ -329,4 +329,11 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "window.casement" to Icons.Filled.Window,
     "lightbulb.led.fill" to Icons.Filled.Highlight,
     "figure.stand.dress" to Icons.Filled.Woman,
+    // 皮肤
+    "heart" to Icons.Outlined.FavoriteBorder,
+    "line.3.horizontal" to Icons.Filled.Menu,
+    "mouth" to Icons.Outlined.Mood,
+    "eye.trianglebadge.exclamationmark" to Icons.Outlined.RemoveRedEye,
+    "eye.circle" to Icons.Outlined.Visibility,
+    "bandage" to Icons.Filled.Healing,
 )
