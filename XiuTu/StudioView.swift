@@ -4,6 +4,7 @@ import WebKit
 /// 摄影棚。布局和修图编辑器一致：上面是照片或套图，底部一级菜单，菜单上方是二、三级选项。
 struct StudioView: View {
     let assetID: String
+    var fileURL: URL? = nil
     var onClose: () -> Void
 
     enum Tab: String, CaseIterable, Identifiable, Hashable {
@@ -116,7 +117,8 @@ struct StudioView: View {
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .task {
-            await model.load(assetID: assetID)
+            if let fileURL { await model.load(fileURL: fileURL) }
+            else { await model.load(assetID: assetID) }
             fitMenus()
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
