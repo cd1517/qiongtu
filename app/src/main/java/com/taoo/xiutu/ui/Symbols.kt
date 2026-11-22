@@ -370,4 +370,14 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     // 皮肤
     "heart" to Icons.Outlined.FavoriteBorder,
     "line.3.horizontal" to Icons.Filled.Menu,
+    // 美体
+    "figure.cooldown" to Icons.Filled.SelfImprovement,
+    "figure.dance" to Icons.Filled.SportsGymnastics,
+    "figure.strengthtraining.traditional" to Icons.Filled.FitnessCenter,
+    "circle.bottomhalf.filled" to Icons.Filled.Tonality,
+    "figure.stand.line.dotted.figure.stand" to Icons.Filled.Accessibility,
+    "oval.portrait" to Icons.Outlined.Egg,
+    "chevron.up" to Icons.Filled.KeyboardArrowUp,
+    "arrow.triangle.2.circlepath" to Icons.Filled.Autorenew,
+    "lock.rectangle" to Icons.Filled.Lock,
 )
