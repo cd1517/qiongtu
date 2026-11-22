@@ -331,4 +331,13 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "figure.stand.dress" to Icons.Filled.Woman,
     "mouth" to Icons.Filled.Mood,
     "heart.circle" to Icons.Filled.VolunteerActivism,
+    // 涂鸦 / 标记 / 边框 / 背景
+    "line.diagonal" to Icons.Filled.HorizontalRule,
+    "highlighter" to Icons.Filled.BorderColor,
+    "1.circle" to Icons.Filled.LooksOne,
+    "app" to Icons.Filled.RoundedCorner,
+    "square.fill" to Icons.Filled.Square,
+    "circle.grid.3x3" to Icons.Outlined.Apps,
+    "arrow.down.right.and.arrow.up.left" to Icons.Filled.CloseFullscreen,
+    "arrow.left.and.right" to Icons.Filled.SwapHoriz,
 )
