@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct XiuTuApp: App {
@@ -16,8 +17,10 @@ enum Route: Hashable {
     case editor(assetID: String, tool: Tool?)
     case coverPicker
     case cover(assetID: String)
+    case coverFile(URL)
     case studioPicker
     case studio(assetID: String)
+    case studioFile(URL)
     case manga
     case rawPicker
     case editorFile(URL)
@@ -28,6 +31,7 @@ enum Route: Hashable {
 
 struct RootView: View {
     @State private var path: [Route] = []
+    @State private var dropHover = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -43,6 +47,7 @@ struct RootView: View {
                     case .picker(let tool):
                         PhotoPickerView(
                             onPick: { id in path.append(.editor(assetID: id, tool: tool)) },
+                            onPickFile: { url in path.append(.editorFile(url)) },
                             onClose: { path.removeAll() }
                         )
                     case .editor(let id, let tool):
@@ -52,19 +57,29 @@ struct RootView: View {
                     case .coverPicker:
                         PhotoPickerView(
                             onPick: { id in path.append(.cover(assetID: id)) },
+                            onPickFile: { url in path.append(.coverFile(url)) },
                             onClose: { path.removeAll() }
                         )
                     case .cover(let id):
                         GodCoverView(assetID: id) {
                             if !path.isEmpty { path.removeLast() }
                         }
+                    case .coverFile(let url):
+                        GodCoverView(assetID: "", fileURL: url) {
+                            if !path.isEmpty { path.removeLast() }
+                        }
                     case .studioPicker:
                         PhotoPickerView(
                             onPick: { id in path.append(.studio(assetID: id)) },
+                            onPickFile: { url in path.append(.studioFile(url)) },
                             onClose: { path.removeAll() }
                         )
                     case .studio(let id):
                         StudioView(assetID: id) {
+                            if !path.isEmpty { path.removeLast() }
+                        }
+                    case .studioFile(let url):
+                        StudioView(assetID: "", fileURL: url) {
                             if !path.isEmpty { path.removeLast() }
                         }
                     case .manga:
@@ -86,6 +101,20 @@ struct RootView: View {
                                     onClose: { path.removeAll() })
                     }
                 }
+        }
+        // Mac 上把访达里的图片直接拖进窗口就能开始编辑（只在主页接收，不打断进行中的编辑）。
+        .dropDestination(for: URL.self) { urls, _ in
+            guard path.isEmpty, let url = urls.first(where: { $0.isImportableImage }) else { return false }
+            path = [.editorFile(url)]
+            return true
+        } isTargeted: { dropHover = $0 }
+        .overlay {
+            if dropHover {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(Theme.accent, lineWidth: 4)
+                    .padding(10)
+                    .allowsHitTesting(false)
+            }
         }
         .onAppear(perform: checkDraft)
         .alert("上次有一张图还没编辑完", isPresented: $askDraft) {
@@ -250,5 +279,13 @@ struct HomeView: View {
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// 拖拽 / 文件选择来的 URL 能否直接当图片打开。
+private extension URL {
+    var isImportableImage: Bool {
+        guard let type = UTType(filenameExtension: pathExtension) else { return false }
+        return type.conforms(to: .image)
     }
 }
