@@ -38,6 +38,7 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "trash.fill" to Icons.Filled.Delete,
     "square.and.arrow.down" to Icons.Filled.Download,
     "square.and.arrow.up" to Icons.Filled.Share,
+    "circle" to Icons.Filled.RadioButtonUnchecked,
     "lock.fill" to Icons.Filled.Lock,
     "lock.open" to Icons.Filled.LockOpen,
     "photo" to Icons.Filled.Image,
