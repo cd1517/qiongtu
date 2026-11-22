@@ -174,6 +174,18 @@ struct LayerPanel: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            if model.layerState.fusing {
+                HStack(spacing: 10) {
+                    ProgressView().tint(.white)
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text("正在融合… \(max(0, Int(context.date.timeIntervalSince(model.layerState.fuseStarted)))) 秒")
+                            .font(.system(size: 14))
+                            .monospacedDigit()
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+            }
             strip
             if let layer = model.selectedLayer {
                 sliderRow(layer)
@@ -230,6 +242,21 @@ struct LayerPanel: View {
                     }
                 }
                 .disabled(model.layerState.busy)
+                if !model.layerState.layers.isEmpty {
+                    Button { model.fuseLayers() } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: "wand.and.sparkles")
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundStyle(.white)
+                                .frame(width: 54, height: 54)
+                                .background(Theme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay(alignment: .topTrailing) { CornerBadge(text: "AI").offset(x: 5, y: -4) }
+                            Text("AI 融合").font(.system(size: 11.5)).foregroundStyle(.white)
+                        }
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(model.layerState.busy)
+                }
                 ForEach(model.layerState.layers.reversed()) { layer in
                     thumb(title: layer.name, image: UIImage(cgImage: layer.preview),
                           selected: model.layerState.selectedID == layer.id, hidden: layer.hidden) {
@@ -242,7 +269,7 @@ struct LayerPanel: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 2)
+            .padding(.top, 6).padding(.bottom, 2)
         }
         .padding(.horizontal, -16)
     }

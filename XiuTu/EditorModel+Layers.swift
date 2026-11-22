@@ -15,6 +15,9 @@ struct LayerState {
     /// 正在导入、抠图或重新生成图层内容。
     var busy = false
     var note: String?
+    /// 正在 AI 融合。
+    var fusing = false
+    var fuseStarted = Date()
     /// 图层下面那张照片的修改步骤。
     var prefix: [EditOp] = []
     /// 图层之后的步骤。
@@ -69,6 +72,54 @@ extension EditorModel {
         if !state.layers.isEmpty { newOps.append(.layers(LayerStack(layers: state.layers))) }
         newOps.append(contentsOf: state.suffix)
         replaceOps(newOps, then: next)
+    }
+
+    // MARK: AI 融合
+
+    /// 融合用的指令。
+    static let fusePrompt = """
+    这张图是把几张照片叠在一起的粗合成（底下是一张照片，上面贴了抠出来的人物或物体）。请把它融合成一张真实、自然、像一次拍下来的照片：\
+    统一所有元素的光线方向和强弱、色温色调、反差、景深虚实、清晰度和画质噪点；\
+    给贴上去的人和物体补上符合场景的阴影、反光和与地面的接触，让它们真的站在、放在这个场景里；\
+    修掉抠图留下的硬边、白边和残留背景，发丝边缘自然；按场景的透视和远近关系让大小比例合理。\
+    每个元素在画面里的位置和整体构图基本不变，画面比例不变。人物的长相、发型、服装和姿势不变，必须还是同一个人；物体的形状和细节不变。\
+    后面附的几张图是各个图层的原图，用来保持人物和物体的细节，不要把它们另外拼进画面。结果必须是一张真实的照片，不要插画感。
+    """
+
+    /// AI 融合：把下面的照片和所有图层交给 AI，融成一张自然的照片。完成后图层这一步和融合结果都写进历史，可以撤销。
+    func fuseLayers() {
+        guard tool == .layers, !layerState.busy, !layerState.layers.isEmpty, let proxy else { return }
+        guard let endpoint = AISettings.shared.endpoint() else {
+            layerState.note = "还没有设置 \(AISettings.shared.active.shortTitle) 的 API Key。"
+            return
+        }
+        let state = layerState
+        let stack = LayerStack(layers: state.layers)
+        let references = state.layers.filter { !$0.hidden }.prefix(3).map { UIImage(cgImage: $0.content) }
+        layerState.busy = true
+        layerState.fusing = true
+        layerState.fuseStarted = Date()
+        layerState.note = nil
+        Task { [weak self] in
+            do {
+                _ = AIClient.takeLastUsage()
+                let result = try await AIRunner.run(endpoint: endpoint, prompt: Self.fusePrompt, proxy: proxy,
+                                                    ops: state.prefix + [.layers(stack)], strokes: [], crop: nil,
+                                                    appendGuidance: false, references: Array(references))
+                _ = AIClient.takeLastUsage()
+                guard let self, self.tool == .layers else { return }
+                self.layerState.busy = false
+                self.layerState.fusing = false
+                // 历史：下面的照片 → 图层 → 融合结果 → 之后的步骤。
+                let fused = AIEdit(result: result, strokes: [])
+                self.replaceOps(state.prefix + [.layers(stack), .ai(fused)] + state.suffix)
+            } catch {
+                guard let self, self.tool == .layers else { return }
+                self.layerState.busy = false
+                self.layerState.fusing = false
+                if !(error is CancellationError) { self.layerState.note = error.localizedDescription }
+            }
+        }
     }
 
     /// 重新算一遍"图层下面的照片"的预览。
