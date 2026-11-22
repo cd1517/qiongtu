@@ -226,7 +226,7 @@ fun <T> UnderlineTabs(items: List<T>, selected: T, title: (T) -> String, onSelec
 fun PillButton(title: String, modifier: Modifier = Modifier, color: Color = Color.White, enabled: Boolean = true, badge: String? = null, onClick: () -> Unit) {
     Box(modifier) {
         Box(
-            Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).background(color).alpha(if (enabled) 1f else 0.4f).press(enabled, onClick),
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).press(enabled, onClick).clip(CircleShape).background(if (enabled) color else color.copy(alpha = color.alpha * 0.4f)),
             contentAlignment = Alignment.Center,
         ) { Text(title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.Black) }
         if (badge != null) CornerBadge(badge, Modifier.align(Alignment.TopEnd).offset(x = (-6).dp, y = (-4).dp))

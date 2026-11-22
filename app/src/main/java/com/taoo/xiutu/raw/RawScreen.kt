@@ -219,12 +219,12 @@ private fun RawView(name: String, file: File, onClose: () -> Unit, onEdit: (File
                     contentAlignment = Alignment.Center,
                 ) { Icon(sym("square.and.arrow.down"), "存相册", tint = Color.White, modifier = Modifier.size(19.dp)) }
                 Box(
-                    Modifier.clip(CircleShape).background(Color.White).alpha(if (enabled) 1f else 0.4f).press(enabled) {
+                    Modifier.press(enabled) {
                         scope.launch {
                             val f = model.developToFile(File(context.cacheDir, "raw-output"))
                             if (f != null) onEdit(f) else toast = "冲洗失败"
                         }
-                    }.padding(horizontal = 14.dp, vertical = 8.dp),
+                    }.clip(CircleShape).background(if (enabled) Color.White else Color.White.copy(alpha = 0.4f)).padding(horizontal = 14.dp, vertical = 8.dp),
                 ) { Text("进入编辑", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.Black) }
             }
 
