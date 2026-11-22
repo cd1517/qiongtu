@@ -206,7 +206,7 @@ class EditorModel(val context: Context) {
     fun commitTool(next: (() -> Unit)? = null) {
         val s = session ?: run { next?.invoke(); return }
         if (s.busy) return
-        val newOps = runCatching { s.commitOps() }.getOrElse { emptyList() }
+        val newOps = runCatching { s.commitOps() }.onFailure { it.printStackTrace() }.getOrElse { emptyList() }
         comparing = false
         val r = reopened
         if (r != null) {
