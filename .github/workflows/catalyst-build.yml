@@ -1,0 +1,33 @@
+name: Mac Catalyst Build
+
+# 云端编译 Mac 版（本机无 Xcode / 磁盘不足时的替代路径）
+on:
+  workflow_dispatch:
+  push:
+    branches: [catalyst]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (Mac Catalyst)
+        run: |
+          xcodebuild -project XiuTu.xcodeproj -scheme XiuTu \
+            -configuration Release \
+            -destination 'platform=macOS,variant=Mac Catalyst' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO build | tail -30
+
+      - name: Package (ad-hoc 签名 + 打包)
+        run: |
+          cd build/Build/Products/Release
+          codesign --force --deep -s - XiuTu.app
+          zip -qry XiuTu-Mac.zip XiuTu.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XiuTu-Mac
+          path: build/Build/Products/Release/XiuTu-Mac.zip
+          retention-days: 30
