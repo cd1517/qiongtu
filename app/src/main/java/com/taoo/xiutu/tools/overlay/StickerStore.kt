@@ -128,7 +128,7 @@ object StickerAI {
         var usage: AIUsage? = null
         val isOpenAI = endpoint.provider == AIProvider.OPENAI
         // 兼容 OpenAI 接口的自定义服务（AI 模块里叫 CUSTOM）
-        val isCustom = endpoint.provider.name == "CUSTOM"
+        val isCustom = endpoint.provider == com.taoo.xiutu.ai.AIProvider.CUSTOM
 
         if (isOpenAI || isCustom) {
             val transparent = isOpenAI
