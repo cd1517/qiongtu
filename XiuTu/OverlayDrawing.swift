@@ -1,0 +1,491 @@
+import Accelerate
+import CoreGraphics
+import CoreText
+import Foundation
+
+/// 文字 / 贴纸的实际绘制。只用 Core Graphics、Core Text 和 vImage，不依赖 UIKit，可以放心在后台线程跑。
+/// 坐标系是 Core Graphics 原生的：原点左下角，y 向上。
+enum OverlayDrawing {
+    /// 排好版、还没画的一项。
+    struct Layout {
+        fileprivate let item: OverlayItem
+        fileprivate let fontSize: CGFloat
+        /// 位图大小（像素）。
+        let size: CGSize
+        /// 文字排版框 / 图片所在的位置。
+        fileprivate let content: CGRect
+        fileprivate let font: CTFont?
+        fileprivate let fakeBold: Bool
+        fileprivate let boxPath: CGPath?
+        fileprivate let boxEvenOdd: Bool
+    }
+
+    private static let sRGB = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+
+    // MARK: 各种效果的实际大小（都按字号折算）
+
+    private static func strokeLine(_ item: OverlayItem, _ fs: CGFloat) -> CGFloat {
+        item.strokeOn ? fs * 0.3 * min(max(item.strokeWidth, 0), 1) : 0
+    }
+
+    private static func shadowOffset(_ item: OverlayItem, _ fs: CGFloat, unit: CGFloat = 0.5) -> CGSize {
+        let d = fs * unit * min(max(item.shadowDistance, 0), 1)
+        let a = item.shadowAngle * .pi / 180
+        // 屏幕上 90° 是向下；这里 y 向上，所以取反。
+        return CGSize(width: d * cos(a), height: -d * sin(a))
+    }
+
+    private static func shadowBlur(_ item: OverlayItem, _ fs: CGFloat, unit: CGFloat = 0.35) -> CGFloat {
+        fs * unit * min(max(item.shadowBlur, 0), 1)
+    }
+
+    private static func glowBlur(_ item: OverlayItem, _ fs: CGFloat) -> CGFloat {
+        fs * (0.08 + 0.42 * min(max(item.glowSize, 0), 1))
+    }
+
+    // MARK: 排版
+
+    static func layout(_ item: OverlayItem, fontSize fs: CGFloat) -> Layout? {
+        guard fs >= 1 else { return nil }
+        if let image = item.image { return imageLayout(item, image: image.cg, width: fs) }
+        guard !item.text.isEmpty else { return nil }
+
+        var fakeBold = false
+        let font: CTFont
+        if item.isSticker {
+            font = OverlayFonts.ctFont(id: OverlayItem.defaultFontID, size: fs)
+        } else {
+            font = styled(OverlayFonts.ctFont(id: item.fontID, size: fs), item: item, size: fs, fakeBold: &fakeBold)
+        }
+        let probe = attributed(item, font: font, fontSize: fs, color: OverlayColor.white.cgColor(), stroke: 0)
+        let setter = CTFramesetterCreateWithAttributedString(probe)
+        let limit = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        let fit = CTFramesetterSuggestFrameSizeWithConstraints(setter, CFRange(location: 0, length: 0), nil, limit, nil)
+        let text = CGRect(x: 0, y: 0, width: ceil(fit.width) + 2, height: ceil(fit.height) + 2)
+
+        var box: CGPath?
+        var evenOdd = false
+        var anchor = text
+        // 字形可能比排版框大一圈（斜体、花体的笔画），四周至少留这么多。
+        var margin = fs * (item.isSticker ? 0.06 : 0.25)
+        if !item.isSticker {
+            let line = strokeLine(item, fs) / 2 + (fakeBold ? fs * 0.03 : 0)
+            margin = max(margin, line + fs * 0.06)
+            if item.glowOn { margin = max(margin, glowBlur(item, fs) * 1.7 + line) }
+            if item.shadowOn {
+                let o = shadowOffset(item, fs)
+                margin = max(margin, max(abs(o.width), abs(o.height)) + shadowBlur(item, fs) * 1.7 + line)
+            }
+            if item.boxOn {
+                let lines = lineRects(setter: setter, in: text)
+                let shape = boxShape(item, text: text, lines: lines, fs: fs)
+                box = shape.path
+                evenOdd = shape.evenOdd
+                anchor = shape.path.boundingBoxOfPath
+            }
+        }
+        var union = text.insetBy(dx: -margin, dy: -margin)
+        if box != nil { union = union.union(anchor.insetBy(dx: -1, dy: -1)) }
+        // 以"底色形状（没有就是文字）"的中心为中心，上下左右对称地留边：
+        // 这样调阴影方向、发光大小时，字在画面上的位置不会跟着跳。
+        let c = CGPoint(x: anchor.midX, y: anchor.midY)
+        let halfW = ceil(max(c.x - union.minX, union.maxX - c.x))
+        let halfH = ceil(max(c.y - union.minY, union.maxY - c.y))
+        let shift = CGAffineTransform(translationX: halfW - c.x, y: halfH - c.y)
+        var t = shift
+        return Layout(item: item, fontSize: fs, size: CGSize(width: halfW * 2, height: halfH * 2),
+                      content: text.applying(shift), font: font, fakeBold: fakeBold,
+                      boxPath: box?.copy(using: &t), boxEvenOdd: evenOdd)
+    }
+
+    private static func imageLayout(_ item: OverlayItem, image: CGImage, width: CGFloat) -> Layout? {
+        guard image.width > 0, image.height > 0 else { return nil }
+        let w = max(1, width.rounded())
+        let h = max(1, (w * CGFloat(image.height) / CGFloat(image.width)).rounded())
+        var margin: CGFloat = 1
+        let line = item.strokeOn ? imageOutline(item, w) : 0
+        margin += line * 1.3
+        if item.shadowOn {
+            let o = shadowOffset(item, w, unit: 0.12)
+            margin = max(margin, max(abs(o.width), abs(o.height)) + shadowBlur(item, w, unit: 0.08) * 1.7 + line * 1.3 + 1)
+        }
+        margin = ceil(margin)
+        return Layout(item: item, fontSize: w, size: CGSize(width: w + margin * 2, height: h + margin * 2),
+                      content: CGRect(x: margin, y: margin, width: w, height: h), font: nil, fakeBold: false,
+                      boxPath: nil, boxEvenOdd: false)
+    }
+
+    /// 图片贴纸的白边宽度（像素）。
+    private static func imageOutline(_ item: OverlayItem, _ width: CGFloat) -> CGFloat {
+        width * 0.06 * min(max(item.strokeWidth, 0.05), 1)
+    }
+
+    /// 加粗、斜体。字体本身没有对应的字重时，加粗用描一圈同色的边来模拟，斜体用倾斜来模拟。
+    private static func styled(_ base: CTFont, item: OverlayItem, size: CGFloat, fakeBold: inout Bool) -> CTFont {
+        var font = base
+        if item.bold {
+            if let b = CTFontCreateCopyWithSymbolicTraits(font, size, nil, .traitBold, .traitBold),
+               CTFontGetSymbolicTraits(b).contains(.traitBold), !CTFontGetSymbolicTraits(base).contains(.traitBold) {
+                font = b
+            } else {
+                fakeBold = true
+            }
+        }
+        if item.italic {
+            if let i = CTFontCreateCopyWithSymbolicTraits(font, size, nil, .traitItalic, .traitItalic),
+               CTFontGetSymbolicTraits(i).contains(.traitItalic) {
+                font = i
+            } else {
+                var skew = CGAffineTransform(a: 1, b: 0, c: 0.21, d: 1, tx: 0, ty: 0)
+                font = CTFontCreateCopyWithAttributes(font, size, &skew, nil)
+            }
+        }
+        return font
+    }
+
+    /// stroke > 0：只画这么粗的描边（像素）；stroke < 0：填充并且加一圈同色的边（模拟加粗）；0：只填充。
+    private static func attributed(_ item: OverlayItem, font: CTFont, fontSize fs: CGFloat,
+                                   color: CGColor, stroke: CGFloat) -> CFAttributedString {
+        var alignment: CTTextAlignment
+        switch item.align {
+        case .left: alignment = .left
+        case .center: alignment = .center
+        case .right: alignment = .right
+        }
+        if item.isSticker { alignment = .center }
+        var spacing = item.isSticker ? 0 : fs * min(max(item.lineSpacing, -0.3), 2)
+        let paragraph: CTParagraphStyle = withUnsafePointer(to: &alignment) { a in
+            withUnsafePointer(to: &spacing) { s in
+                let settings = [
+                    CTParagraphStyleSetting(spec: .alignment, valueSize: MemoryLayout<CTTextAlignment>.size, value: a),
+                    CTParagraphStyleSetting(spec: .lineSpacingAdjustment, valueSize: MemoryLayout<CGFloat>.size, value: s),
+                ]
+                return CTParagraphStyleCreate(settings, settings.count)
+            }
+        }
+        var attrs: [CFString: Any] = [
+            kCTFontAttributeName: font,
+            kCTForegroundColorAttributeName: color,
+            kCTParagraphStyleAttributeName: paragraph,
+        ]
+        if !item.isSticker, item.letterSpacing != 0 {
+            attrs[kCTKernAttributeName] = fs * min(max(item.letterSpacing, -0.2), 2) as NSNumber
+        }
+        if stroke != 0 {
+            // Core Text 的描边宽度是"字号的百分之几"。
+            attrs[kCTStrokeWidthAttributeName] = stroke / fs * 100 as NSNumber
+            attrs[kCTStrokeColorAttributeName] = color
+        }
+        return CFAttributedStringCreate(nil, item.text as CFString, attrs as CFDictionary)
+    }
+
+    /// 每一行文字占的位置（荧光笔底色按行画）。
+    private static func lineRects(setter: CTFramesetter, in rect: CGRect) -> [CGRect] {
+        let frame = CTFramesetterCreateFrame(setter, CFRange(location: 0, length: 0), CGPath(rect: rect, transform: nil), nil)
+        guard let lines = CTFrameGetLines(frame) as? [CTLine], !lines.isEmpty else { return [] }
+        var origins = [CGPoint](repeating: .zero, count: lines.count)
+        CTFrameGetLineOrigins(frame, CFRange(location: 0, length: 0), &origins)
+        var out: [CGRect] = []
+        for (line, origin) in zip(lines, origins) {
+            var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
+            let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+            let trailing = CGFloat(CTLineGetTrailingWhitespaceWidth(line))
+            guard width - trailing > 0.5 else { continue }
+            out.append(CGRect(x: rect.minX + origin.x, y: rect.minY + origin.y - descent,
+                              width: width - trailing, height: ascent + descent))
+        }
+        return out
+    }
+
+    // MARK: 底色形状
+
+    private static func boxShape(_ item: OverlayItem, text t: CGRect, lines: [CGRect], fs: CGFloat) -> (path: CGPath, evenOdd: Bool) {
+        let pad = fs * (0.06 + 0.5 * min(max(item.boxPadding, 0), 1))
+        let px = pad, py = pad * 0.55
+        let body = t.insetBy(dx: -px, dy: -py)
+        let path = CGMutablePath()
+        switch item.boxShape {
+        case .rect:
+            path.addRect(body)
+        case .rounded:
+            let r = min(fs * 0.28, body.height / 2, body.width / 2)
+            path.addRoundedRect(in: body, cornerWidth: r, cornerHeight: r)
+        case .capsule:
+            let b = body.insetBy(dx: -body.height * 0.18, dy: 0)
+            let r = min(b.height, b.width) / 2
+            path.addRoundedRect(in: b, cornerWidth: r, cornerHeight: r)
+        case .ellipse:
+            let a = (t.width / 2 + px * 0.4) * 1.36
+            let b = (t.height / 2 + py * 0.6) * 1.42
+            path.addEllipse(in: CGRect(x: t.midX - a, y: t.midY - b, width: a * 2, height: b * 2))
+        case .bubble:
+            let r = min(fs * 0.34, body.height / 2, body.width / 2)
+            path.addRoundedRect(in: body, cornerWidth: r, cornerHeight: r)
+            // 左下角的小尾巴。
+            let x0 = body.minX + min(r + fs * 0.1, body.width * 0.3)
+            let w = min(fs * 0.5, body.width * 0.35)
+            path.move(to: CGPoint(x: x0, y: body.minY + 1))
+            path.addLine(to: CGPoint(x: x0 + w, y: body.minY + 1))
+            path.addLine(to: CGPoint(x: x0 - fs * 0.08, y: body.minY - fs * 0.42))
+            path.closeSubpath()
+        case .slant:
+            let s = body.height * 0.3
+            let b = body.insetBy(dx: -s / 2, dy: 0)
+            path.move(to: CGPoint(x: b.minX - s / 2, y: b.minY))
+            path.addLine(to: CGPoint(x: b.maxX - s / 2, y: b.minY))
+            path.addLine(to: CGPoint(x: b.maxX + s / 2, y: b.maxY))
+            path.addLine(to: CGPoint(x: b.minX + s / 2, y: b.maxY))
+            path.closeSubpath()
+        case .tag:
+            let d = body.height * 0.5
+            let r = min(fs * 0.16, body.height / 2)
+            path.move(to: CGPoint(x: body.minX - d, y: body.midY))
+            path.addLine(to: CGPoint(x: body.minX, y: body.maxY))
+            path.addLine(to: CGPoint(x: body.maxX - r, y: body.maxY))
+            path.addArc(tangent1End: CGPoint(x: body.maxX, y: body.maxY),
+                        tangent2End: CGPoint(x: body.maxX, y: body.maxY - r), radius: r)
+            path.addLine(to: CGPoint(x: body.maxX, y: body.minY + r))
+            path.addArc(tangent1End: CGPoint(x: body.maxX, y: body.minY),
+                        tangent2End: CGPoint(x: body.maxX - r, y: body.minY), radius: r)
+            path.addLine(to: CGPoint(x: body.minX, y: body.minY))
+            path.closeSubpath()
+            // 穿绳子的小孔。
+            let hole = body.height * 0.09
+            path.addEllipse(in: CGRect(x: body.minX - d * 0.38 - hole, y: body.midY - hole, width: hole * 2, height: hole * 2))
+            return (path, true)
+        case .ribbon:
+            let d = body.height * 0.34
+            let l = body.minX - d * 1.3, rr = body.maxX + d * 1.3
+            path.move(to: CGPoint(x: l, y: body.maxY))
+            path.addLine(to: CGPoint(x: rr, y: body.maxY))
+            path.addLine(to: CGPoint(x: rr - d, y: body.midY))
+            path.addLine(to: CGPoint(x: rr, y: body.minY))
+            path.addLine(to: CGPoint(x: l, y: body.minY))
+            path.addLine(to: CGPoint(x: l + d, y: body.midY))
+            path.closeSubpath()
+        case .marker:
+            // 每一行下半截画一道，像荧光笔划过。
+            let grow = min(max(item.boxPadding, 0), 1)
+            let rects = lines.isEmpty ? [t] : lines
+            for line in rects {
+                let h = line.height * (0.34 + 0.3 * grow)
+                let bar = CGRect(x: line.minX - fs * 0.14, y: line.minY + line.height * 0.06,
+                                 width: line.width + fs * 0.28, height: h)
+                let r = min(h * 0.28, bar.width / 2)
+                path.addRoundedRect(in: bar, cornerWidth: r, cornerHeight: r)
+            }
+        }
+        return (path, false)
+    }
+
+    // MARK: 画
+
+    static func draw(_ layout: Layout) -> CGImage? {
+        let w = Int(layout.size.width), h = Int(layout.size.height)
+        guard w >= 1, h >= 1,
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: sRGB,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .high
+        let item = layout.item
+        let whole = CGRect(x: 0, y: 0, width: w, height: h)
+        let opacity = min(max(item.opacity, 0), 1)
+        if opacity < 1 {
+            ctx.setAlpha(opacity)
+            ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        }
+        if let image = item.image {
+            drawImage(image.cg, layout: layout, in: ctx, whole: whole)
+        } else {
+            drawText(layout, in: ctx, whole: whole)
+        }
+        if opacity < 1 { ctx.endTransparencyLayer() }
+        return ctx.makeImage()
+    }
+
+    private static func drawText(_ layout: Layout, in ctx: CGContext, whole: CGRect) {
+        guard let font = layout.font else { return }
+        let item = layout.item
+        let fs = layout.fontSize
+        let w = Int(whole.width), h = Int(whole.height)
+        let styled = !item.isSticker
+        let line = styled ? strokeLine(item, fs) : 0
+        let bold: CGFloat = layout.fakeBold ? fs * 0.045 : 0
+
+        /// 把字画一遍：先描边（如果有），再填充。
+        func glyphs(into c: CGContext, fill: CGColor, stroke: CGColor) {
+            c.textMatrix = .identity
+            c.setLineJoin(.round)
+            c.setLineCap(.round)
+            c.setShouldSmoothFonts(false)
+            // Core Text 把字距加在每个字后面，最后一个字后面也有；居中、靠右时往右挪回来。
+            var nudge: CGFloat = 0
+            if styled, item.letterSpacing != 0 {
+                let kern = fs * min(max(item.letterSpacing, -0.2), 2)
+                nudge = item.align == .center ? kern / 2 : (item.align == .right ? kern : 0)
+            }
+            let path = CGPath(rect: layout.content.offsetBy(dx: nudge, dy: 0), transform: nil)
+            func pass(_ color: CGColor, _ strokeWidth: CGFloat) {
+                let string = attributed(item, font: font, fontSize: fs, color: color, stroke: strokeWidth)
+                let setter = CTFramesetterCreateWithAttributedString(string)
+                CTFrameDraw(CTFramesetterCreateFrame(setter, CFRange(location: 0, length: 0), path, nil), c)
+            }
+            if line > 0 { pass(stroke, line + bold) }
+            pass(fill, bold > 0 ? -bold : 0)
+        }
+
+        if styled, item.boxOn, let box = layout.boxPath {
+            ctx.addPath(box)
+            ctx.setFillColor(item.boxColor.cgColor(alpha: item.boxOpacity))
+            ctx.fillPath(using: layout.boxEvenOdd ? .evenOdd : .winding)
+        }
+
+        if styled, item.shadowOn || item.glowOn {
+            // 先得到"字（连描边）盖住了哪些地方"，阴影和发光都从它模糊出来。
+            let white = OverlayColor.white.cgColor()
+            let coverage = self.coverage(width: w, height: h) { mask in
+                glyphs(into: mask, fill: white, stroke: white)
+            }
+            if item.shadowOn {
+                let soft = softened(coverage, width: w, height: h, radius: shadowBlur(item, fs))
+                let o = shadowOffset(item, fs)
+                fill(mask: soft, in: ctx, rect: whole.offsetBy(dx: o.width, dy: o.height),
+                     color: item.shadowColor.cgColor(alpha: item.shadowOpacity))
+            }
+            if item.glowOn {
+                var soft = softened(coverage, width: w, height: h, radius: glowBlur(item, fs))
+                let gain = 1.2 + 4.5 * min(max(item.glowStrength, 0), 1)
+                remap(&soft.pixels, width: soft.w, height: soft.h) { Int(CGFloat($0) * gain) }
+                fill(mask: soft, in: ctx, rect: whole, color: item.glowColor.cgColor())
+            }
+        }
+
+        glyphs(into: ctx, fill: item.isSticker ? OverlayColor.white.cgColor() : item.color.cgColor(),
+               stroke: item.strokeColor.cgColor())
+    }
+
+    private static func drawImage(_ image: CGImage, layout: Layout, in ctx: CGContext, whole: CGRect) {
+        let item = layout.item
+        let w = Int(whole.width), h = Int(whole.height)
+        let width = layout.fontSize
+        if item.strokeOn || item.shadowOn {
+            // 图片的不透明范围。
+            var coverage = self.coverage(width: w, height: h) { mask in
+                mask.interpolationQuality = .high
+                mask.draw(image, in: layout.content)
+            }
+            if item.strokeOn {
+                // 往外扩一圈：模糊之后取一个很低的阈值，边缘是圆润的。
+                // 模糊可以在缩小的图上做，但取阈值要回到原大小再做，边缘才是清楚的。
+                let line = imageOutline(item, width)
+                let soft = softened(coverage, width: w, height: h, radius: line * 1.2)
+                coverage = resized(soft, width: w, height: h)
+                remap(&coverage, width: w, height: h) { ($0 - 12) * 18 }
+            }
+            if item.shadowOn {
+                let soft = softened(coverage, width: w, height: h, radius: shadowBlur(item, width, unit: 0.08))
+                let o = shadowOffset(item, width, unit: 0.12)
+                fill(mask: soft, in: ctx, rect: whole.offsetBy(dx: o.width, dy: o.height),
+                     color: item.shadowColor.cgColor(alpha: item.shadowOpacity))
+            }
+            if item.strokeOn {
+                fill(mask: Mask(pixels: coverage, w: w, h: h), in: ctx, rect: whole, color: item.strokeColor.cgColor())
+            }
+        }
+        ctx.draw(image, in: layout.content)
+    }
+
+    /// 画一遍，取出"哪些地方被盖住了"（0...255），一行一行从上到下。
+    private static func coverage(width w: Int, height h: Int, draw: (CGContext) -> Void) -> [UInt8] {
+        var out = [UInt8](repeating: 0, count: w * h)
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        rgba.withUnsafeMutableBytes { raw in
+            guard let ctx = CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                      space: sRGB, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+            draw(ctx)
+            // 取出透明通道（RGBA 里的第 4 个）。逐像素的事都交给 vImage，调试版里也不会慢。
+            out.withUnsafeMutableBytes { alpha in
+                var src = vImage_Buffer(data: raw.baseAddress, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: w * 4)
+                var dst = vImage_Buffer(data: alpha.baseAddress, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: w)
+                vImageExtractChannel_ARGB8888(&src, &dst, 3, vImage_Flags(kvImageNoFlags))
+            }
+        }
+        return out
+    }
+
+    /// 把每个像素的值按 f 换算一遍（查表）。
+    private static func remap(_ pixels: inout [UInt8], width: Int, height: Int, _ f: (Int) -> Int) {
+        guard width > 0, height > 0 else { return }
+        let table = (0..<256).map { UInt8(min(max(f($0), 0), 255)) }
+        pixels.withUnsafeMutableBytes { raw in
+            var buffer = vImage_Buffer(data: raw.baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width)
+            vImageTableLookUp_Planar8(&buffer, &buffer, table, vImage_Flags(kvImageNoFlags))
+        }
+    }
+
+    // MARK: 小工具
+
+    /// 一张 8 位的覆盖图（可以比画布小，用的时候会拉伸到画布大小）。
+    private struct Mask {
+        var pixels: [UInt8]
+        let w: Int
+        let h: Int
+    }
+
+    /// 把覆盖图当蒙版，用指定颜色填到 ctx 里。
+    private static func fill(mask: Mask, in ctx: CGContext, rect: CGRect, color: CGColor) {
+        guard let provider = CGDataProvider(data: Data(mask.pixels) as CFData),
+              let image = CGImage(width: mask.w, height: mask.h, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: mask.w,
+                                  space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                                  provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else { return }
+        ctx.saveGState()
+        ctx.clip(to: rect, mask: image)
+        ctx.setFillColor(color)
+        ctx.fill(rect)
+        ctx.restoreGState()
+    }
+
+    /// 模糊一张覆盖图。半径大的时候先缩小再模糊（模糊过的东西本来就没有细节），大图上也很快。
+    private static func softened(_ pixels: [UInt8], width w: Int, height h: Int, radius: CGFloat) -> Mask {
+        let factor = min(8, max(1, Int(radius / 6)))
+        guard factor > 1 else {
+            var copy = pixels
+            blur(&copy, width: w, height: h, radius: radius)
+            return Mask(pixels: copy, w: w, h: h)
+        }
+        let sw = max(1, w / factor), sh = max(1, h / factor)
+        var small = resized(Mask(pixels: pixels, w: w, h: h), width: sw, height: sh)
+        blur(&small, width: sw, height: sh, radius: radius * CGFloat(sw) / CGFloat(w))
+        return Mask(pixels: small, w: sw, h: sh)
+    }
+
+    /// 把覆盖图缩放到指定大小。
+    private static func resized(_ mask: Mask, width w: Int, height h: Int) -> [UInt8] {
+        if mask.w == w, mask.h == h { return mask.pixels }
+        var out = [UInt8](repeating: 0, count: w * h)
+        var source = mask.pixels
+        source.withUnsafeMutableBytes { a in
+            out.withUnsafeMutableBytes { b in
+                var src = vImage_Buffer(data: a.baseAddress, height: vImagePixelCount(mask.h), width: vImagePixelCount(mask.w), rowBytes: mask.w)
+                var dst = vImage_Buffer(data: b.baseAddress, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: w)
+                vImageScale_Planar8(&src, &dst, nil, vImage_Flags(kvImageHighQualityResampling))
+            }
+        }
+        return out
+    }
+
+    /// 模糊一张 8 位的图。连做两次三角形卷积，效果接近高斯模糊，耗时和模糊半径无关。
+    private static func blur(_ pixels: inout [UInt8], width: Int, height: Int, radius: CGFloat) {
+        let k = UInt32(max(1, Int(radius.rounded()))) * 2 + 1
+        guard k >= 3, width > 0, height > 0 else { return }
+        var scratch = [UInt8](repeating: 0, count: pixels.count)
+        pixels.withUnsafeMutableBytes { a in
+            scratch.withUnsafeMutableBytes { b in
+                var src = vImage_Buffer(data: a.baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width)
+                var dst = vImage_Buffer(data: b.baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width)
+                let flags = vImage_Flags(kvImageEdgeExtend)
+                vImageTentConvolve_Planar8(&src, &dst, nil, 0, 0, k, k, 0, flags)
+                vImageTentConvolve_Planar8(&dst, &src, nil, 0, 0, k, k, 0, flags)
+            }
+        }
+    }
+}

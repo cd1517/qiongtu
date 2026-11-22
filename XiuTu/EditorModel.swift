@@ -1,0 +1,1525 @@
+import CoreImage
+import Photos
+import SwiftUI
+import UIKit
+
+enum CropAspect: String, CaseIterable, Identifiable {
+    case free, original, r1x1, r3x4, r4x3, r9x16, r16x9, r2x3, r3x2
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .free: return "自由"
+        case .original: return "原始"
+        case .r1x1: return "1:1"
+        case .r3x4: return "3:4"
+        case .r4x3: return "4:3"
+        case .r9x16: return "9:16"
+        case .r16x9: return "16:9"
+        case .r2x3: return "2:3"
+        case .r3x2: return "3:2"
+        }
+    }
+
+    /// 宽 / 高。free 和 original 没有固定值。
+    var ratio: CGFloat? {
+        switch self {
+        case .free, .original: return nil
+        case .r1x1: return 1
+        case .r3x4: return 3.0 / 4
+        case .r4x3: return 4.0 / 3
+        case .r9x16: return 9.0 / 16
+        case .r16x9: return 16.0 / 9
+        case .r2x3: return 2.0 / 3
+        case .r3x2: return 3.0 / 2
+        }
+    }
+}
+
+/// 编辑器的全部状态。
+///
+/// 思路：已确认的编辑存成一串和分辨率无关的操作（ops）。
+/// 屏幕预览 = 操作作用在缩小的代理图上；保存 = 同一串操作作用在原图上。
+/// 所以撤销只是去掉最后一个操作，原图始终不动。
+@MainActor
+@Observable
+final class EditorModel {
+    // 状态
+    var isLoading = true
+    var isBusy = false
+    var errorText: String?
+    var displayImage: UIImage?
+    var comparing = false
+    var tool: Tool?
+    private(set) var ops: [EditOp] = []
+    /// 撤销 / 重做存的是整串操作的快照，所以原地改动历史中间的某一步（比如重新编辑图层）也能撤销。
+    private var undoStates: [[EditOp]] = []
+    /// 每改动一次编辑步骤就加一，用来判断"保存之后有没有再改过"。
+    private(set) var revision = 0
+    private var redoStates: [[EditOp]] = []
+
+    // 调色
+    var adjust = AdjustParams()
+    var adjustGroup: AdjustGroup = .light
+    var adjustKey: AdjustKey = .brightness
+
+    // 滤镜
+    var lookID: String?
+    var lookIntensity: CGFloat = 1
+    var lookCategory: LookCategory = .camera
+    var lookThumbs: [String: UIImage] = [:]
+    var lookThumbOriginal: UIImage?
+
+    // 裁剪
+    var crop = CropParams()
+    var cropAspect: CropAspect = .free
+
+    // 马赛克
+    var mosaic = MosaicParams()
+    var mosaicStyle: MosaicStyle = .pixel
+    var mosaicStrength: CGFloat = 0.45
+    var brushSize: CGFloat = 36
+    var erasing = false
+
+    // 文字 / 贴纸
+    var overlayItems: [OverlayItem] = []
+    var selectedOverlayID: UUID?
+
+    // AI 修图
+    var aiGroup: AIPresetGroup = .fix
+    var aiPrompt = ""
+    var aiStrokes: [MosaicStroke] = []
+    var aiBrush: CGFloat = 44
+    var aiErasing = false
+    var aiRunning = false
+    var aiStarted = Date()
+    var aiError: String?
+    var aiHasResult = false
+
+    var aiStrength: CGFloat = 1
+    /// 当前指令是不是"没涂抹就自动只处理头部"的那一类（修跑焦）。
+    var aiFaceCrop = false
+    /// 美发类指令：没涂抹时自动找到人脸，把头和头发这一大块发给 AI（比修跑焦的范围大，长发也能包住）。
+    var aiHairCrop = false
+    /// 只采用 AI 的光影和颜色、细节保留原图。结果出来后可以在面板上切换，不用重新生成。
+    var aiToneOnly = false
+    /// 最近一次请求的实际用量说明。
+    var aiUsageText: String?
+
+    // 手动美体（液化）
+    var liquify = LiquifyParams()
+    var liquifyBrush: CGFloat = 70
+    var liquifyStrength: CGFloat = 0.6
+    var liquifyRestore = false
+    /// 固定背景：推的时候只有人变形。
+    var liquifyLock = false
+    var liquifyLockBusy = false
+    var liquifyNote: String?
+    @ObservationIgnored private var personMask: CGImage?
+    /// 提前补好的"没有人的背景"，实时预览时直接用。
+    @ObservationIgnored private var personPlate: CGImage?
+    @ObservationIgnored private var liquifyGrid: LiquifyGrid?
+    @ObservationIgnored private var liquifyLast: CGPoint?
+    @ObservationIgnored private var liquifyRadius: CGFloat = 0
+    @ObservationIgnored private var liquifyStroke = 0
+
+    // 涂鸦 / 标记、边框 / 背景、拼图、图层：状态和实现分别在 EditorModel+Doodle / +Frame / +Collage / +Layers 里。
+    var doodleState = DoodleState()
+    var frameState = FrameState()
+    var collageState = CollageState()
+    var layerState = LayerState()
+    /// 面部重塑：状态和实现在 EditorModel+Reshape 里。
+    var reshapeState = ReshapeState()
+    /// 美妆、皮肤：状态和实现在 EditorModel+Makeup / +Skin 里。
+    var makeupState = MakeupState()
+    var skinState = SkinState()
+    /// 美体塑形（一键美体、各部位塑形、增高 / 瘦身 / 缩放）：状态和实现在 EditorModel+Shape 里。
+    var shapeState = ShapeState()
+
+    /// 滤镜里的"拍立得"：状态和实现在 EditorModel+Instant 里。
+    var instantState = InstantState()
+
+    /// 重新打开历史里的某一步来改（装饰类工具）时记下的东西；nil = 这次是新加一步。
+    private struct Reopened {
+        var prefix: [EditOp]
+        var suffix: [EditOp]
+        /// 打开之前的底图，取消时换回去。
+        var preview: CIImage?
+        var image: UIImage?
+        /// 打开时文字 / 贴纸原来的样子，用来判断有没有改过。
+        var overlay: [OverlayItem] = []
+    }
+    @ObservationIgnored private var reopened: Reopened?
+
+    /// 大师风格按钮上的缩略图：用当前这张照片在本机模拟出大致的色调。
+    var masterThumbs: [String: UIImage] = [:]
+    @ObservationIgnored private var masterThumbsStarted = false
+
+    // 美颜
+    enum BeautyMode { case ai, manual }
+    var beautyMode: BeautyMode = .ai
+    var beauty = BeautyParams()
+    var beautyKey: BeautyKey = .smooth
+    var beautyPreset: String?
+    var beautyStyle: String?
+    var faces: [FaceInfo] = []
+    var faceIndex = 0
+    var detectingFaces = false
+    /// 画布要放大到的区域（归一化坐标）。
+    var focusRect: CGRect?
+
+    // 放大后的高清贴片：只渲染屏幕上看得到的那一块。
+    var detailImage: UIImage?
+    var detailRect: CGRect?
+    @ObservationIgnored private var viewport: CGRect?
+    @ObservationIgnored private var viewportPixels: CGFloat = 0
+    @ObservationIgnored private var detailTask: Task<Void, Never>?
+
+    @ObservationIgnored private var aiResult: CGImage?
+    @ObservationIgnored private var aiTask: Task<Void, Never>?
+    @ObservationIgnored private var aiFrame: CGRect?
+    @ObservationIgnored private var aiEllipse: CGRect?
+
+    /// 这次进美颜后已经生成过的结果，按"第几张脸 + 风格"记住，再点同一个风格直接切换，不重新调用接口。
+    private struct CachedFace {
+        let image: CGImage
+        let frame: CGRect
+        let ellipse: CGRect
+    }
+    @ObservationIgnored private var faceCache: [String: CachedFace] = [:]
+    @ObservationIgnored private var pendingFaceKey: String?
+    private(set) var cachedFaceKeys: Set<String> = []
+
+    /// 原图（全分辨率）、编辑用的代理图（长边最多 5120）、当前已确认状态的预览（长边最多 1600）。
+    @ObservationIgnored private(set) var source: CIImage?
+    @ObservationIgnored private(set) var proxy: CIImage?
+    @ObservationIgnored private(set) var basePreview: CIImage?
+    @ObservationIgnored private(set) var baseUIImage: UIImage?
+    @ObservationIgnored private var originalUIImage: UIImage?
+    @ObservationIgnored private var maskSet: MosaicMaskSet?
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private let live = LiveRenderer()
+
+    var canUndo: Bool { !undoStates.isEmpty && tool == nil }
+    var canRedo: Bool { !redoStates.isEmpty && tool == nil }
+    var hasEdits: Bool { !ops.isEmpty }
+    /// 打开之后有没有动过（单独编辑图层内容时，一开始就可能带着已有的步骤）。
+    var hasChanges: Bool { !undoStates.isEmpty }
+
+    /// 画布上实际显示的图：按住对比按钮时显示修改前的样子。
+    var shownImage: UIImage? {
+        guard comparing else { return displayImage }
+        return (tool == nil ? originalUIImage : baseUIImage) ?? displayImage
+    }
+
+    // MARK: 加载
+
+    func load(assetID: String) async {
+        guard let asset = PhotoLibrary.asset(id: assetID),
+              let data = await PhotoLibrary.data(for: asset) else {
+            errorText = "无法读取这张图片"
+            isLoading = false
+            return
+        }
+        await load(data: data)
+    }
+
+    /// 从文件打开（RAW 冲洗好的图走这里）。
+    func load(fileURL: URL) async {
+        guard let data = try? Data(contentsOf: fileURL) else {
+            errorText = "无法读取这张图片"
+            isLoading = false
+            return
+        }
+        await load(data: data)
+    }
+
+    private func load(data: Data) async {
+        let loaded = await Task.detached(priority: .userInitiated) { () -> (CIImage, CIImage, CIImage, UIImage)? in
+            guard let full = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return nil }
+            guard let proxy = Renderer.shared.rasterize(full, maxDimension: 5120),
+                  let preview = Renderer.shared.rasterize(proxy.ci, maxDimension: 1600) else { return nil }
+            return (full, proxy.ci, preview.ci, UIImage(cgImage: preview.cg))
+        }.value
+        guard let loaded else {
+            errorText = "这张图片的格式暂不支持"
+            isLoading = false
+            return
+        }
+        source = loaded.0
+        proxy = loaded.1
+        basePreview = loaded.2
+        baseUIImage = loaded.3
+        originalUIImage = loaded.3
+        displayImage = loaded.3
+        isLoading = false
+    }
+
+    /// 从一张已经在内存里的图开始，并带上已有的修改步骤（单独编辑图层内容时用）。
+    func load(image: CIImage, ops initial: [EditOp]) async {
+        let loaded = await Task.detached(priority: .userInitiated) { () -> (CIImage, CIImage, UIImage)? in
+            guard let proxy = Renderer.shared.rasterize(image, maxDimension: 5120),
+                  let preview = Renderer.shared.rasterize(proxy.ci, maxDimension: 1600) else { return nil }
+            return (proxy.ci, preview.ci, UIImage(cgImage: preview.cg))
+        }.value
+        guard let loaded else {
+            errorText = "这张图片的格式暂不支持"
+            isLoading = false
+            return
+        }
+        source = image
+        proxy = loaded.0
+        basePreview = loaded.1
+        baseUIImage = loaded.2
+        originalUIImage = loaded.2
+        displayImage = loaded.2
+        ops = initial
+        isLoading = false
+        if !initial.isEmpty { await rebuildBase() }
+    }
+
+    private func rebuildBase() async {
+        guard let proxy else { return }
+        let ops = self.ops
+        generation += 1
+        let gen = generation
+        isBusy = true
+        let result = await Task.detached(priority: .userInitiated) { () -> (CIImage, UIImage)? in
+            let out = EditOp.apply(ops, to: proxy)
+            guard let r = Renderer.shared.rasterize(out, maxDimension: 1600) else { return nil }
+            return (r.ci, UIImage(cgImage: r.cg))
+        }.value
+        guard gen == generation else { return }
+        if let result {
+            basePreview = result.0
+            baseUIImage = result.1
+            displayImage = result.1
+            masterThumbs = [:]
+            masterThumbsStarted = false
+        }
+        isBusy = false
+        refreshDetail()
+    }
+
+    // MARK: 工具进出
+
+    func begin(_ t: Tool) {
+        guard let base = basePreview, !isBusy else { return }
+        comparing = false
+        switch t {
+        case .adjust:
+            adjust = AdjustParams()
+            adjustGroup = .light
+            adjustKey = .brightness
+        case .filter:
+            lookID = nil
+            lookIntensity = 1
+            makeLookThumbs(base)
+            beginInstant()
+        case .crop:
+            crop = CropParams()
+            cropAspect = .free
+        case .mosaic:
+            mosaic = MosaicParams()
+            erasing = false
+            maskSet = MosaicMaskSet(width: Int(base.extent.width), height: Int(base.extent.height))
+        case .text, .sticker:
+            overlayItems = []
+            selectedOverlayID = nil
+        case .ai:
+            resetAI()
+            maskSet = MosaicMaskSet(width: Int(base.extent.width), height: Int(base.extent.height))
+        case .liquify:
+            liquify = LiquifyParams()
+            liquifyRestore = false
+            liquifyLock = false
+            liquifyLockBusy = false
+            liquifyNote = nil
+            personMask = nil
+            personPlate = nil
+            liquifyStroke = 0
+            liquifyLast = nil
+            liquifyGrid = LiquifyGrid(imageSize: base.extent.size)
+        case .doodle, .mark:
+            beginDoodle(t)
+        case .frame, .backdrop:
+            beginFrame(t)
+        case .collage:
+            beginCollage()
+        case .layers:
+            beginLayers()
+        case .reshape:
+            beginReshape()
+        case .makeup:
+            beginMakeup()
+        case .skin:
+            beginSkin()
+        case .shape:
+            beginShape()
+        case .beauty:
+            resetAI()
+            beauty = BeautyParams()
+            beautyKey = .smooth
+            beautyPreset = nil
+            beautyStyle = nil
+            faces = []
+            faceIndex = 0
+            focusRect = nil
+            faceCache = [:]
+            faceStates = [:]
+            editedFaces = []
+            cachedFaceKeys = []
+            pendingFaceKey = nil
+            detectFaces()
+        }
+        tool = t
+        refreshDetail()
+    }
+
+    private func resetAI() {
+        aiTask?.cancel()
+        aiTask = nil
+        aiStrokes = []
+        aiErasing = false
+        aiRunning = false
+        aiError = nil
+        aiUsageText = nil
+        aiResult = nil
+        aiHasResult = false
+        aiFrame = nil
+        aiEllipse = nil
+        aiStrength = 1
+        aiToneOnly = false
+    }
+
+    /// 从滤镜里点了一位大师：转到 AI 修图，带上这位大师的指令并直接开始生成。
+    func startMaster(_ preset: AIPreset) {
+        startAIPreset(preset, group: .master)
+    }
+
+    /// 从别的工具（调色、滤镜）里点了一个要用 AI 的功能：
+    /// 当前工具里已经调好的先保留成一步，再转到 AI 修图、带上这条指令并直接开始生成。
+    func startAIPreset(_ preset: AIPreset, group: AIPresetGroup = .fix) {
+        guard !aiRunning, !isBusy else { return }
+        commitTool { [self] in
+            beginAI(group: group, prompt: preset.prompt)
+            guard tool == .ai else { return }
+            aiFaceCrop = preset.faceCrop
+            aiHairCrop = preset.hairCrop
+            aiToneOnly = preset.toneOnly
+            runAI()
+        }
+    }
+
+    /// 美体里在"AI 美体"和"手动美体"之间切换。已经做出来的修改先保留成一步，再换过去。
+    func switchBody(manual: Bool) {
+        guard let t = tool, !aiRunning, !isBusy else { return }
+        if manual ? t == .liquify : t == .ai { return }
+        commitTool { [self] in
+            if manual { begin(.liquify) } else { beginAI(group: .body) }
+        }
+    }
+
+    /// 直接显示一张已经搭好的预览图（新工具的实时预览用）。
+    func showLive(_ image: CIImage) {
+        submit(.direct(image))
+    }
+
+    /// 大师风格缩略图：第一次需要时在后台算一遍。
+    func prepareMasterThumbs() {
+        guard !masterThumbsStarted, let base = basePreview else { return }
+        masterThumbsStarted = true
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let small = Renderer.shared.downscaled(Self.centerCrop(base, aspect: 68.0 / 84.0), maxDimension: 260)
+            guard let raster = Renderer.shared.rasterize(small, maxDimension: 260) else { return }
+            var thumbs: [String: UIImage] = [:]
+            for (title, look) in MasterPreview.looks {
+                if let cg = Renderer.shared.cgImage(look.apply(to: raster.ci, intensity: 1)) {
+                    thumbs[title] = UIImage(cgImage: cg)
+                }
+            }
+            await self?.setMasterThumbs(thumbs)
+        }
+    }
+
+    private func setMasterThumbs(_ thumbs: [String: UIImage]) {
+        masterThumbs = thumbs
+    }
+
+    /// 居中裁成指定的宽高比，原点移回 (0,0)。
+    nonisolated static func centerCrop(_ image: CIImage, aspect: CGFloat) -> CIImage {
+        let e = image.extent
+        var w = e.width, h = e.height
+        if w / h > aspect { w = h * aspect } else { h = w / aspect }
+        let r = CGRect(x: e.midX - w / 2, y: e.midY - h / 2, width: w, height: h).integral
+        return image.cropped(to: r).transformed(by: CGAffineTransform(translationX: -r.minX, y: -r.minY))
+    }
+
+    func beginAI(group: AIPresetGroup, prompt: String = "") {
+        begin(.ai)
+        guard tool == .ai else { return }
+        aiGroup = group
+        aiPrompt = prompt
+        aiFaceCrop = false
+        aiHairCrop = false
+        aiToneOnly = false
+    }
+
+    func cancelTool() {
+        resetAI()
+        focusRect = nil
+        tool = nil
+        comparing = false
+        maskSet = nil
+        if let r = reopened {
+            // 刚才是把历史里的一步重新打开在改：底图换回成品的样子。
+            reopened = nil
+            if let preview = r.preview { basePreview = preview }
+            if let image = r.image { baseUIImage = image }
+        }
+        displayImage = baseUIImage
+        refreshDetail()
+    }
+
+    // MARK: 重新打开装饰
+
+    private struct ReopenPlan {
+        var prefix: [EditOp]
+        var suffix: [EditOp]
+        var op: EditOp
+    }
+
+    /// 再进这个工具时，历史里有没有该接着改的那一步。
+    private func reopenPlan(for t: Tool) -> ReopenPlan? {
+        // AI 整张重画过之后，前面那些步骤已经画死在结果里，不能再单独改。
+        let barrier = ops.lastIndex { $0.bakesInput } ?? -1
+        if t == .text || t == .sticker {
+            // 后面没有动过画布大小的文字 / 贴纸：全部拿出来放到最上面一起改，改的时候看到的就是成品的样子。
+            let floor = max(barrier, ops.lastIndex { $0.changesCanvas } ?? -1)
+            var items: [OverlayItem] = []
+            var rest: [EditOp] = []
+            for (i, op) in ops.enumerated() {
+                if i > floor, case .overlay(let list) = op { items += list } else { rest.append(op) }
+            }
+            if !items.isEmpty { return ReopenPlan(prefix: rest, suffix: [], op: .overlay(items)) }
+        }
+        // 其余的回到那一步当时的画面上改，改完后面的步骤照旧套上去。
+        guard let i = ops.lastIndex(where: { $0.reopens(with: t) }), i > barrier else { return nil }
+        return ReopenPlan(prefix: Array(ops[..<i]), suffix: Array(ops[(i + 1)...]), op: ops[i])
+    }
+
+    /// 打开工具。装饰类工具（文字、贴纸、涂鸦、标记、马赛克、边框、背景）如果历史里已经有这一类的步骤，
+    /// 就把那一步重新打开接着改，而不是另起一步。ready 在工具真正打开之后调用。
+    func open(_ t: Tool, selecting id: UUID? = nil, then ready: (() -> Void)? = nil) {
+        guard tool == nil, !isBusy, !isLoading else { return }
+        guard let plan = reopenPlan(for: t), let proxy else {
+            begin(t)
+            ready?()
+            return
+        }
+        isBusy = true
+        Task {
+            let prefix = plan.prefix
+            let result = await Task.detached(priority: .userInitiated) { () -> (CIImage, UIImage)? in
+                let out = EditOp.apply(prefix, to: proxy)
+                guard let r = Renderer.shared.rasterize(out, maxDimension: 1600) else { return nil }
+                return (r.ci, UIImage(cgImage: r.cg))
+            }.value
+            isBusy = false
+            guard tool == nil, let result else { return }
+            reopened = Reopened(prefix: plan.prefix, suffix: plan.suffix, preview: basePreview, image: baseUIImage)
+            basePreview = result.0
+            baseUIImage = result.1
+            displayImage = result.1
+            begin(t)
+            guard tool == t else {
+                cancelTool()
+                return
+            }
+            switch plan.op {
+            case .overlay(let items):
+                overlayItems = items
+                reopened?.overlay = items
+                selectedOverlayID = id
+            case .mosaic(let params):
+                mosaic = params
+                maskSet?.rebuild(params.strokes)
+                renderMosaic()
+            case .doodle(let params):
+                reopenDoodle(params)
+            case .frame(let params):
+                reopenFrame(params)
+            case .backdrop(let params):
+                reopenBackdrop(params)
+            default:
+                break
+            }
+            ready?()
+        }
+    }
+
+    /// 没开工具时点了画面：点中了还能改的文字、贴纸、涂鸦、标记或马赛克，就直接把它打开。
+    func tapDecoration(at point: CGPoint) {
+        guard tool == nil, !isBusy, let size = baseUIImage?.size, size.width > 0, size.height > 0 else { return }
+        // 只有后面没被 AI 重画、画布也没变过的那些，位置才和现在的画面对得上。
+        let floor = max(ops.lastIndex { $0.bakesInput } ?? -1, ops.lastIndex { $0.changesCanvas } ?? -1)
+        let ratio = size.height / size.width
+        // 以画面宽度为单位量距离。
+        func local(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x, y: p.y * ratio) }
+        let tap = local(point)
+        func hits(_ points: [CGPoint], width: CGFloat) -> Bool {
+            let reach = max(width * max(1, ratio) / 2, 0.035)
+            let list = points.map(local)
+            guard let first = list.first else { return false }
+            if list.count == 2 {
+                // 形状（箭头、方框、圆圈……）：点在它占的那一块里就算。
+                let box = CGRect(x: min(list[0].x, list[1].x), y: min(list[0].y, list[1].y),
+                                 width: abs(list[0].x - list[1].x), height: abs(list[0].y - list[1].y))
+                return box.insetBy(dx: -reach, dy: -reach).contains(tap)
+            }
+            var previous = first
+            for p in list {
+                let vx = p.x - previous.x, vy = p.y - previous.y
+                let wx = tap.x - previous.x, wy = tap.y - previous.y
+                let len = vx * vx + vy * vy
+                let t = len > 0 ? min(max((wx * vx + wy * vy) / len, 0), 1) : 0
+                if hypot(wx - vx * t, wy - vy * t) <= reach { return true }
+                previous = p
+            }
+            return false
+        }
+        for i in ops.indices.reversed() where i > floor {
+            switch ops[i] {
+            case .overlay(let items):
+                for item in items.reversed() {
+                    guard let r = OverlayRenderer.render(item, imageWidth: 600, maxPixel: 1200) else { continue }
+                    let w = r.image.size.width / r.k / 600, h = r.image.size.height / r.k / 600
+                    let dx = tap.x - item.center.x, dy = tap.y - item.center.y * ratio
+                    let c = cos(item.rotation), s = sin(item.rotation)
+                    let lx = dx * c + dy * s, ly = -dx * s + dy * c
+                    if abs(lx) <= w / 2 + 0.015, abs(ly) <= h / 2 + 0.015 {
+                        open(item.isSticker ? .sticker : .text, selecting: item.id)
+                        return
+                    }
+                }
+            case .doodle(let params):
+                if let stroke = params.strokes.last(where: { $0.brush != .eraser && hits($0.points, width: $0.width) }) {
+                    open(stroke.points.count <= 2 ? .mark : .doodle)
+                    return
+                }
+            case .mosaic(let params):
+                if params.strokes.contains(where: { !$0.erase && hits($0.points, width: $0.width) }) {
+                    open(.mosaic)
+                    return
+                }
+            default:
+                break
+            }
+        }
+    }
+
+    /// 确认当前工具。next 不为空时，确认完（或者本来就没改什么）接着执行它，用来从一个工具直接换到另一个。
+    func commitTool(then next: (() -> Void)? = nil) {
+        guard let t = tool else {
+            next?()
+            return
+        }
+        var op: EditOp?
+        var extra: [EditOp] = []
+        switch t {
+        case .adjust:
+            if !adjust.isIdentity { op = .adjust(adjust) }
+        case .filter:
+            if let id = lookID, lookIntensity > 0 {
+                op = .look(id: id, intensity: lookIntensity)
+            } else {
+                op = instantOp()
+            }
+        case .crop:
+            if !crop.isIdentity { op = .crop(crop) }
+        case .mosaic:
+            if mosaic.hasPaint { op = .mosaic(mosaic) }
+        case .text, .sticker:
+            let items = overlayItems.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            if !items.isEmpty { op = .overlay(items) }
+        case .ai:
+            if !aiRunning, let edit = currentAIEdit { op = .ai(edit) }
+        case .liquify:
+            if !liquify.isIdentity { op = .liquify(liquify) }
+        case .doodle, .mark:
+            op = doodleOp()
+        case .frame, .backdrop:
+            op = frameOp(t)
+        case .collage:
+            op = collageOp()
+        case .layers:
+            commitLayers(then: next)
+            return
+        case .reshape:
+            op = reshapeOp()
+        case .makeup:
+            op = makeupOp()
+        case .skin:
+            op = skinOp()
+        case .shape:
+            op = shapeOp()
+        case .beauty:
+            // 每张脸的 AI 美颜和手动美颜各算一步，撤销时可以分开撤。
+            if !aiRunning {
+                let list = faceOps()
+                op = list.first
+                extra = Array(list.dropFirst())
+            }
+        }
+        comparing = false
+        if let r = reopened {
+            // 重新打开的那一步：文字 / 贴纸没改过就什么都不动；否则把改好的放回去，什么都没剩就等于删掉这一步。
+            if case .overlay(let items)? = op, items == r.overlay {
+                cancelTool()
+                next?()
+                return
+            }
+            var newOps = r.prefix
+            if let op { newOps.append(op) }
+            newOps.append(contentsOf: r.suffix)
+            reopened = nil
+            replaceOps(newOps, then: next)
+            return
+        }
+        guard let op else {
+            cancelTool()
+            next?()
+            return
+        }
+        recordUndo()
+        ops.append(op)
+        ops.append(contentsOf: extra)
+        Task {
+            await rebuildBase()
+            tool = nil
+            maskSet = nil
+            focusRect = nil
+            resetAI()
+            next?()
+        }
+    }
+
+    /// 改动 ops 之前先记一笔。
+    private func recordUndo() {
+        undoStates.append(ops)
+        redoStates.removeAll()
+        revision += 1
+    }
+
+    /// 把整串操作换成新的一串（图层工具原地修改历史中间的那一步时用），然后关掉当前工具。
+    func replaceOps(_ newOps: [EditOp], then next: (() -> Void)? = nil) {
+        recordUndo()
+        ops = newOps
+        comparing = false
+        Task {
+            await rebuildBase()
+            tool = nil
+            maskSet = nil
+            focusRect = nil
+            resetAI()
+            next?()
+        }
+    }
+
+    func undo() {
+        guard canUndo, let previous = undoStates.popLast() else { return }
+        redoStates.append(ops)
+        ops = previous
+        revision += 1
+        Task { await rebuildBase() }
+    }
+
+    func redo() {
+        guard canRedo, let next = redoStates.popLast() else { return }
+        undoStates.append(ops)
+        ops = next
+        revision += 1
+        Task { await rebuildBase() }
+    }
+
+    // MARK: 高清贴片
+
+    func setViewport(_ rect: CGRect?, pixels: CGFloat) {
+        viewport = rect
+        viewportPixels = pixels
+        refreshDetail()
+    }
+
+    /// 当前工具里还没确认的修改，写成编辑步骤。返回 nil 表示这种状态下不显示高清贴片。
+    private func pendingOps() -> [EditOp]? {
+        switch tool {
+        case .none:
+            return []
+        case .some(.adjust):
+            return adjust.isIdentity ? [] : [.adjust(adjust)]
+        case .some(.filter):
+            if let id = lookID, lookIntensity > 0 { return [.look(id: id, intensity: lookIntensity)] }
+            if let op = instantOp() { return [op] }
+            return []
+        case .some(.mosaic):
+            return mosaic.hasPaint ? [.mosaic(mosaic)] : []
+        case .some(.ai):
+            if aiRunning { return nil }
+            if let edit = currentAIEdit { return [.ai(edit)] }
+            return aiHasRegion ? nil : []
+        case .some(.liquify):
+            return liquify.isIdentity ? [] : [.liquify(liquify)]
+        case .some(.beauty):
+            return faceOps()
+        case .some(.doodle), .some(.mark):
+            return doodlePendingOps()
+        case .some(.frame):
+            return framePendingOps(.frame)
+        case .some(.backdrop):
+            return framePendingOps(.backdrop)
+        case .some(.reshape):
+            return reshapePendingOps()
+        case .some(.makeup):
+            return makeupPendingOps()
+        case .some(.skin):
+            return skinPendingOps()
+        default:
+            return nil
+        }
+    }
+
+    /// 画面有变化时先撤掉旧贴片，停手一小会儿后按当前看到的区域重新渲染一张清晰的。
+    private func refreshDetail() {
+        detailTask?.cancel()
+        if detailImage != nil { detailImage = nil }
+        guard let rect = viewport, let proxy, !isBusy, !isLoading, let pending = pendingOps() else { return }
+        let all = (reopened?.prefix ?? ops) + pending
+        let pixels = viewportPixels
+        detailTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            guard !Task.isCancelled else { return }
+            let image = await Task.detached(priority: .userInitiated) { () -> UIImage? in
+                let out = EditOp.apply(all, to: proxy)
+                let e = out.extent
+                let r = CGRect(x: rect.minX * e.width, y: (1 - rect.maxY) * e.height,
+                               width: rect.width * e.width, height: rect.height * e.height).integral.intersection(e)
+                guard r.width >= 2, r.height >= 2 else { return nil }
+                var piece = out.cropped(to: r).transformed(by: CGAffineTransform(translationX: -r.minX, y: -r.minY))
+                let scale = min(1, max(pixels, 1) / r.width)
+                if scale < 1 {
+                    piece = piece.applyingFilter("CILanczosScaleTransform", parameters: [
+                        kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1.0,
+                    ]).cropped(to: CGRect(x: 0, y: 0, width: max(1, (r.width * scale).rounded(.down)),
+                                          height: max(1, (r.height * scale).rounded(.down))))
+                }
+                guard let cg = Renderer.shared.cgImage(piece) else { return nil }
+                return UIImage(cgImage: cg)
+            }.value
+            guard let self, !Task.isCancelled, let image else { return }
+            self.detailRect = rect
+            self.detailImage = image
+        }
+    }
+
+    func submit(_ job: LiveJob) {
+        refreshDetail()
+        live.submit(job) { [weak self] image in
+            guard let self, self.tool != nil else { return }
+            self.displayImage = image
+        }
+    }
+
+    // MARK: 滤镜
+
+    func selectLook(_ id: String?) {
+        clearInstant()
+        lookID = id
+        lookIntensity = 1
+        renderLook()
+    }
+
+    func renderLook() {
+        guard let base = basePreview else { return }
+        submit(.look(base, lookID, lookIntensity))
+    }
+
+    private func makeLookThumbs(_ base: CIImage) {
+        lookThumbs = [:]
+        lookThumbOriginal = nil
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let small = Renderer.shared.rasterize(base, maxDimension: 220) else { return }
+            var thumbs: [String: UIImage] = [:]
+            for look in FilmLook.all {
+                if let cg = Renderer.shared.cgImage(look.apply(to: small.ci, intensity: 1)) {
+                    thumbs[look.id] = UIImage(cgImage: cg)
+                }
+            }
+            await self?.setLookThumbs(thumbs, original: UIImage(cgImage: small.cg))
+        }
+    }
+
+    private func setLookThumbs(_ thumbs: [String: UIImage], original: UIImage) {
+        lookThumbs = thumbs
+        lookThumbOriginal = original
+    }
+
+    // MARK: 裁剪
+
+    /// 当前锁定的比例，换算成归一化坐标下的 宽/高；nil = 自由。
+    var cropLockedAspect: CGFloat? {
+        guard let size = displayImage?.size, size.width > 0, size.height > 0 else { return nil }
+        switch cropAspect {
+        case .free: return nil
+        case .original: return 1
+        default:
+            guard let ratio = cropAspect.ratio else { return nil }
+            return ratio * size.height / size.width
+        }
+    }
+
+    func setCropAspect(_ aspect: CropAspect) {
+        cropAspect = aspect
+        guard let a = cropLockedAspect else { return }
+        let w: CGFloat = a >= 1 ? 1 : a
+        let h: CGFloat = a >= 1 ? 1 / a : 1
+        crop.rect = CGRect(x: (1 - w) / 2, y: (1 - h) / 2, width: w, height: h)
+    }
+
+    func cropRotate() {
+        crop.rotateClockwise()
+        cropAspect = .free
+        renderCrop()
+    }
+
+    func cropFlipHorizontal() {
+        crop.flipHorizontal()
+        renderCrop()
+    }
+
+    func cropFlipVertical() {
+        crop.flipVertical()
+        renderCrop()
+    }
+
+    func setStraighten(_ degrees: CGFloat) {
+        crop.straighten = abs(degrees) < 0.3 ? 0 : degrees
+        renderCrop()
+    }
+
+    func resetCrop() {
+        crop = CropParams()
+        cropAspect = .free
+        renderCrop()
+    }
+
+    private func renderCrop() {
+        guard let base = basePreview else { return }
+        submit(.crop(base, crop))
+    }
+
+    // MARK: 马赛克
+
+    func strokeBegan(at point: CGPoint, displayScale: CGFloat) {
+        if tool == .doodle || tool == .mark {
+            doodleStrokeBegan(at: point, displayScale: displayScale)
+            return
+        }
+        if tool == .liquify {
+            guard displayScale > 0 else { return }
+            liquifyStroke += 1
+            liquifyLast = point
+            liquifyRadius = liquifyBrush / 2 / displayScale
+            return
+        }
+        if tool == .ai {
+            guard displayScale > 0, !aiRunning, !aiHasResult else { return }
+            let stroke = AIRegion.stroke(points: [point], width: aiBrush / displayScale, erase: aiErasing)
+            aiStrokes.append(stroke)
+            maskSet?.add(points: [point], stroke: stroke)
+            renderAI()
+            return
+        }
+        guard tool == .mosaic, displayScale > 0 else { return }
+        let stroke = MosaicStroke(points: [point], width: brushSize / displayScale, erase: erasing,
+                                  style: mosaicStyle, strength: mosaicStrength)
+        mosaic.strokes.append(stroke)
+        maskSet?.add(points: [point], stroke: stroke)
+        renderMosaic()
+    }
+
+    func strokeMoved(to point: CGPoint) {
+        if tool == .doodle || tool == .mark {
+            doodleStrokeMoved(to: point)
+            return
+        }
+        if tool == .liquify {
+            guard let last = liquifyLast, let grid = liquifyGrid, let base = basePreview else { return }
+            let segment = LiquifySegment(from: last, to: point, radius: liquifyRadius, strength: liquifyStrength,
+                                         restore: liquifyRestore, stroke: liquifyStroke)
+            liquify.segments.append(segment)
+            grid.add(segment)
+            liquifyLast = point
+            submit(.liquify(base, grid.snapshot(), liquify.lockMask, personPlate))
+            return
+        }
+        if tool == .ai {
+            guard !aiRunning, !aiHasResult, let last = aiStrokes.indices.last,
+                  let previous = aiStrokes[last].points.last else { return }
+            aiStrokes[last].points.append(point)
+            maskSet?.add(points: [previous, point], stroke: aiStrokes[last])
+            renderAI()
+            return
+        }
+        guard tool == .mosaic, let last = mosaic.strokes.indices.last,
+              let previous = mosaic.strokes[last].points.last else { return }
+        mosaic.strokes[last].points.append(point)
+        maskSet?.add(points: [previous, point], stroke: mosaic.strokes[last])
+        renderMosaic()
+    }
+
+    func strokeEnded() {
+        if tool == .doodle || tool == .mark { doodleStrokeEnded() }
+    }
+
+    func strokeCancelled() {
+        undoStroke()
+    }
+
+    func undoStroke() {
+        if tool == .doodle || tool == .mark {
+            doodleUndoStroke()
+            return
+        }
+        if tool == .liquify {
+            guard let last = liquify.segments.last?.stroke, let grid = liquifyGrid, let base = basePreview else { return }
+            liquify.segments.removeAll { $0.stroke == last }
+            grid.replay(liquify.segments)
+            liquifyLast = nil
+            submit(.liquify(base, grid.snapshot(), liquify.lockMask, personPlate))
+            return
+        }
+        if tool == .ai {
+            guard !aiRunning, !aiHasResult, !aiStrokes.isEmpty else { return }
+            aiStrokes.removeLast()
+            maskSet?.rebuild(aiStrokes)
+            renderAI()
+            return
+        }
+        guard tool == .mosaic, !mosaic.strokes.isEmpty else { return }
+        mosaic.strokes.removeLast()
+        maskSet?.rebuild(mosaic.strokes)
+        renderMosaic()
+    }
+
+    private func renderMosaic() {
+        guard let base = basePreview, let maskSet else { return }
+        submit(.mosaic(base, maskSet.snapshot()))
+    }
+
+    /// 开关"固定背景"。第一次打开时在本机识别一次人像。
+    func setLiquifyLock(_ on: Bool) {
+        guard tool == .liquify, !liquifyLockBusy else { return }
+        liquifyNote = nil
+        func apply(_ mask: CGImage?) {
+            liquifyLock = mask != nil
+            liquify.lockMask = mask
+            if let grid = liquifyGrid, let base = basePreview {
+                submit(.liquify(base, grid.snapshot(), liquify.lockMask, personPlate))
+            }
+        }
+        guard on else { return apply(nil) }
+        if let personMask { return apply(personMask) }
+        guard let cg = baseUIImage?.cgImage, let base = basePreview else { return }
+        liquifyLockBusy = true
+        Task { [weak self] in
+            let found = await Task.detached(priority: .userInitiated) { () -> (CGImage?, CGImage?) in
+                guard let mask = PersonSegmenter.mask(for: cg) else { return (nil, nil) }
+                return (mask, Renderer.shared.cgImage(LiquifyGrid.backgroundPlate(base, lock: mask)))
+            }.value
+            let mask = found.0
+            guard let self, self.tool == .liquify else { return }
+            self.liquifyLockBusy = false
+            self.personMask = mask
+            self.personPlate = found.1
+            if mask == nil { self.liquifyNote = "这张图里没有识别到人物，没法固定背景。" }
+            apply(mask)
+        }
+    }
+
+    func resetLiquify() {
+        guard tool == .liquify, let grid = liquifyGrid, let base = basePreview else { return }
+        liquify = LiquifyParams(lockMask: liquify.lockMask)
+        grid.reset()
+        submit(.liquify(base, grid.snapshot(), liquify.lockMask, personPlate))
+    }
+
+    // MARK: AI 修图
+
+    var aiHasRegion: Bool { aiStrokes.contains { !$0.erase } }
+
+    func clearAIRegion() {
+        guard !aiRunning, !aiHasResult else { return }
+        aiStrokes = []
+        maskSet?.rebuild([])
+        renderAI()
+    }
+
+    /// 当前这次 AI 结果对应的编辑步骤；还没有结果时是 nil。
+    private var currentAIEdit: AIEdit? {
+        guard let result = aiResult else { return nil }
+        // "只取光影色彩"只属于 AI 修图；美颜要的就是 AI 改过的脸，不能套这个模式。
+        return AIEdit(result: result, strokes: aiStrokes, frame: aiFrame, ellipse: aiEllipse, strength: aiStrength,
+                      toneOnly: aiToneOnly && tool == .ai)
+    }
+
+    private func renderAI() {
+        guard let base = basePreview else { return }
+        if tool == .beauty {
+            let layers = faceLayers()
+            submit(.beauty(base, layers.edits, layers.beauties))
+        } else if let edit = currentAIEdit {
+            submit(.aiResult(base, edit))
+        } else {
+            submit(.aiRegion(base, aiHasRegion ? maskSet?.snapshot().first?.image : nil))
+        }
+    }
+
+    func setAIToneOnly(_ on: Bool) {
+        aiToneOnly = on
+        renderAI()
+    }
+
+    func setAIStrength(_ value: CGFloat) {
+        aiStrength = min(max(value, 0), 1)
+        renderAI()
+    }
+
+    /// 把当前画面和指令发给选中的服务商。
+    func runAI() {
+        let prompt = aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard tool == .ai, !aiRunning else { return }
+        guard !prompt.isEmpty else {
+            aiError = "先写一句要怎么改，或者点上面的快捷指令。"
+            return
+        }
+        aiEllipse = nil
+        if prompt.contains("涂抹区域"), !aiHasRegion {
+            aiError = "先在图上涂抹要去掉的东西，再点发送。"
+            return
+        }
+        if aiHairCrop, !aiHasRegion, let cg = baseUIImage?.cgImage {
+            // 美发：找到脸，把头、头发连同肩膀这一块发出去；找不到脸就发整张图。
+            aiError = nil
+            aiRunning = true
+            aiStarted = Date()
+            Task { [weak self] in
+                let found = await Task.detached(priority: .userInitiated) { FaceDetector.detect(in: cg) }.value
+                guard let self, self.tool == .ai, self.aiRunning else { return }
+                self.aiRunning = false
+                guard let face = found.first else {
+                    self.aiFrame = nil
+                    self.launchAI(prompt: prompt, strokes: [], crop: nil, guidance: true, identity: true)
+                    return
+                }
+                let size = self.pixelSize()
+                let bw = face.box.width * size.width, bh = face.box.height * size.height
+                let side = max(bw, bh) * 5.2
+                // 往下偏一些：长发、披肩发主要在脸的下面和两侧。
+                let cx = face.box.midX * size.width, cy = face.box.midY * size.height + bh * 0.6
+                let frame = CGRect(x: cx - side / 2, y: cy - side / 2, width: side, height: side)
+                    .intersection(CGRect(origin: .zero, size: size))
+                // 这一块几乎占满全图时直接发整张，省得贴回去多一道接缝。
+                if frame.width * frame.height > size.width * size.height * 0.8 {
+                    self.aiFrame = nil
+                    self.launchAI(prompt: prompt, strokes: [], crop: nil, guidance: true, identity: true)
+                    return
+                }
+                self.aiFrame = CGRect(x: frame.minX / size.width, y: frame.minY / size.height,
+                                      width: frame.width / size.width, height: frame.height / size.height)
+                // 贴回的范围比发出去的小一圈：羽化要完全落在发出去的这一块里面，否则边上会露出一条硬边。
+                let inner = frame.insetBy(dx: frame.width * 0.11, dy: frame.height * 0.11)
+                self.aiEllipse = CGRect(x: inner.minX / size.width, y: inner.minY / size.height,
+                                        width: inner.width / size.width, height: inner.height / size.height)
+                self.launchAI(prompt: prompt, strokes: [], crop: self.aiFrame, guidance: false, identity: true)
+            }
+            return
+        }
+        if aiFaceCrop, !aiHasRegion, let cg = baseUIImage?.cgImage {
+            // 先在本机找脸，只把头部这一块发出去；找不到脸再退回整张图。
+            aiError = nil
+            aiRunning = true
+            aiStarted = Date()
+            Task { [weak self] in
+                let found = await Task.detached(priority: .userInitiated) { FaceDetector.detect(in: cg) }.value
+                guard let self, self.tool == .ai, self.aiRunning else { return }
+                self.aiRunning = false
+                guard let face = found.first else {
+                    self.aiFrame = nil
+                    self.launchAI(prompt: prompt, strokes: [], crop: nil, guidance: false, identity: true)
+                    return
+                }
+                let size = self.pixelSize()
+                let bw = face.box.width * size.width, bh = face.box.height * size.height
+                let cx = face.box.midX * size.width, cy = face.box.midY * size.height - bh * 0.1
+                self.aiFrame = self.faceFrame(face, factor: 2.6)
+                // 贴回的范围包住整个头和头发，边缘羽化。
+                self.aiEllipse = CGRect(x: (cx - bw * 0.95) / size.width, y: (cy - bh * 1.1) / size.height,
+                                        width: bw * 1.9 / size.width, height: bh * 2.2 / size.height)
+                self.launchAI(prompt: prompt, strokes: [], crop: self.aiFrame, guidance: false, identity: true)
+            }
+            return
+        }
+        guard aiHasRegion, let crop = regionCrop() else {
+            aiFrame = nil
+            launchAI(prompt: prompt, strokes: [], crop: nil, guidance: true, identity: aiFaceCrop)
+            return
+        }
+        // 涂了区域：只把这一块（带一圈周围环境）裁出来发给 AI，结果也只贴回涂抹的范围。
+        aiFrame = crop
+        if AIIntent.replacesContent(prompt) {
+            // 去掉/替换：涂抹范围当蒙版，让 AI 把里面的东西重画。
+            launchAI(prompt: prompt, strokes: remap(aiStrokes, into: crop), crop: crop, guidance: true)
+        } else {
+            // 在原内容上修改：不发蒙版，AI 看得到原图。
+            let hint = "\n\nThis is a cropped part of a larger photo. Apply the instruction to what is shown here and keep the same framing, position and scale so it can be placed back."
+            launchAI(prompt: prompt + hint, strokes: [], crop: crop, guidance: true, identity: aiFaceCrop)
+        }
+    }
+
+    /// 涂抹范围的外接框，四周留出余量，限制在图片内（归一化坐标）。
+    private func regionCrop() -> CGRect? {
+        let size = pixelSize()
+        let long = max(size.width, size.height)
+        var box: CGRect?
+        for stroke in aiStrokes where !stroke.erase {
+            let half = stroke.width * long / 2
+            for p in stroke.points {
+                let r = CGRect(x: p.x * size.width - half, y: p.y * size.height - half, width: half * 2, height: half * 2)
+                box = box?.union(r) ?? r
+            }
+        }
+        guard var b = box else { return nil }
+        let margin = max(max(b.width, b.height) * 0.35, long * 0.06)
+        b = b.insetBy(dx: -margin, dy: -margin)
+        // 太细长的框补成不超过 2.5:1，接口对比例有限制。
+        if b.width > b.height * 2.5 { b = b.insetBy(dx: 0, dy: -(b.width / 2.5 - b.height) / 2) }
+        if b.height > b.width * 2.5 { b = b.insetBy(dx: -(b.height / 2.5 - b.width) / 2, dy: 0) }
+        b = b.intersection(CGRect(origin: .zero, size: size))
+        guard b.width >= 8, b.height >= 8 else { return nil }
+        return CGRect(x: b.minX / size.width, y: b.minY / size.height, width: b.width / size.width, height: b.height / size.height)
+    }
+
+    /// 把整图坐标的笔画换算到裁剪框内的坐标。
+    private func remap(_ strokes: [MosaicStroke], into crop: CGRect) -> [MosaicStroke] {
+        let size = pixelSize()
+        let k = max(size.width, size.height) / max(crop.width * size.width, crop.height * size.height)
+        return strokes.map { stroke in
+            var s = stroke
+            s.points = stroke.points.map { CGPoint(x: ($0.x - crop.minX) / crop.width, y: ($0.y - crop.minY) / crop.height) }
+            s.width = stroke.width * k
+            return s
+        }
+    }
+
+    /// identity = true：必须还是同一个人的任务。画质设成"自动"时改用高画质，并要求尽量忠实于原图。
+    private func launchAI(prompt: String, strokes: [MosaicStroke], crop: CGRect?, guidance: Bool, identity: Bool = false) {
+        guard let proxy, let started = tool else { return }
+        guard var endpoint = AISettings.shared.endpoint() else {
+            aiError = "还没有设置 \(AISettings.shared.active.shortTitle) 的 API Key。"
+            return
+        }
+        if identity {
+            endpoint.highFidelity = true
+            if endpoint.quality == "auto" { endpoint.quality = "high" }
+        }
+        // 只取光影和颜色时，AI 图的清晰度用不上，按标准尺寸要就够了，省钱。
+        if aiToneOnly, started == .ai { endpoint.hires = false }
+        let ops = self.ops
+        aiError = nil
+        aiResult = nil
+        aiHasResult = false
+        aiUsageText = nil
+        _ = AIClient.takeLastUsage()
+        aiRunning = true
+        aiStarted = Date()
+        renderAI()
+        aiTask = Task { [weak self] in
+            do {
+                let image = try await AIRunner.run(endpoint: endpoint, prompt: prompt, proxy: proxy, ops: ops,
+                                                   strokes: strokes, crop: crop, appendGuidance: guidance)
+                let usage = AIClient.takeLastUsage()
+                if let cost = usage?.cost { AISettings.shared.addSpend(cost) }
+                guard let self, !Task.isCancelled, self.tool == started else { return }
+                self.aiUsageText = usage?.summary
+                self.aiResult = image
+                self.aiHasResult = true
+                self.aiRunning = false
+                if started == .beauty, let key = self.pendingFaceKey, let frame = self.aiFrame, let ellipse = self.aiEllipse {
+                    self.faceCache[key] = CachedFace(image: image, frame: frame, ellipse: ellipse)
+                    self.cachedFaceKeys.insert(key)
+                }
+                self.renderAI()
+            } catch is CancellationError {
+                self?.aiRunning = false
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                self.aiRunning = false
+                self.aiError = error.localizedDescription
+            }
+        }
+    }
+
+    func cancelAI() {
+        aiTask?.cancel()
+        aiTask = nil
+        aiRunning = false
+    }
+
+    /// 不要这次的结果，回到涂抹和写指令的状态。
+    func discardAIResult() {
+        aiResult = nil
+        aiHasResult = false
+        renderAI()
+    }
+
+    // MARK: 美颜
+
+    private func detectFaces() {
+        guard let cg = baseUIImage?.cgImage else { return }
+        detectingFaces = true
+        Task { [weak self] in
+            let found = await Task.detached(priority: .userInitiated) { FaceDetector.detect(in: cg) }.value
+            guard let self, self.tool == .beauty else { return }
+            self.faces = found
+            self.faceStates = [:]
+            self.beauty.faces = found.first.map { [$0] } ?? []
+            self.faceIndex = 0
+            self.detectingFaces = false
+            self.updateFocus()
+        }
+    }
+
+    private func pixelSize() -> CGSize {
+        baseUIImage?.size ?? CGSize(width: 1, height: 1)
+    }
+
+    /// 以脸为中心、边长为脸的 factor 倍的方框（按像素是正方形），限制在图片范围内。
+    private func faceFrame(_ face: FaceInfo, factor: CGFloat) -> CGRect {
+        let size = pixelSize()
+        let bw = face.box.width * size.width
+        let bh = face.box.height * size.height
+        let side = max(bw, bh) * factor
+        let cx = face.box.midX * size.width
+        // Vision 的框不含额头上半部分，往上挪一点把头顶也框进来。
+        let cy = face.box.midY * size.height - bh * 0.1
+        let rect = CGRect(x: cx - side / 2, y: cy - side / 2, width: side, height: side)
+            .intersection(CGRect(origin: .zero, size: size))
+        return CGRect(x: rect.minX / size.width, y: rect.minY / size.height,
+                      width: rect.width / size.width, height: rect.height / size.height)
+    }
+
+    private func updateFocus() {
+        guard faces.indices.contains(faceIndex) else {
+            focusRect = nil
+            return
+        }
+        focusRect = faceFrame(faces[faceIndex], factor: 1.9)
+    }
+
+    /// 每张脸各自的修改：切到别的脸时先存起来，切回来再取出，互不影响。
+    private struct FaceState {
+        var edit: AIEdit?
+        var style: String?
+        var beauty = BeautyParams()
+        var preset: String?
+    }
+    @ObservationIgnored private var faceStates: [Int: FaceState] = [:]
+    private(set) var editedFaces: Set<Int> = []
+
+    func faceEdited(_ index: Int) -> Bool {
+        index == faceIndex ? (aiHasResult || !beauty.isIdentity) : editedFaces.contains(index)
+    }
+
+    func selectFace(_ index: Int) {
+        guard faces.indices.contains(index), !aiRunning else { return }
+        guard index != faceIndex else { return updateFocus() }
+        // 存下当前这张脸的状态
+        faceStates[faceIndex] = FaceState(edit: currentAIEdit, style: beautyStyle, beauty: beauty, preset: beautyPreset)
+        if currentAIEdit != nil || !beauty.isIdentity { editedFaces.insert(faceIndex) } else { editedFaces.remove(faceIndex) }
+        // 取出要切过去的那张脸的状态
+        faceIndex = index
+        let state = faceStates[index] ?? FaceState()
+        aiResult = state.edit?.result
+        aiHasResult = aiResult != nil
+        aiFrame = state.edit?.frame
+        aiEllipse = state.edit?.ellipse
+        aiStrength = state.edit?.strength ?? 1
+        beautyStyle = state.style
+        beauty = state.beauty
+        beauty.faces = [faces[index]]
+        beautyPreset = state.preset
+        aiUsageText = nil
+        aiError = nil
+        updateFocus()
+        renderAI()
+    }
+
+    /// 点画面：点到哪张脸就切到哪张。
+    func tapFace(at point: CGPoint) {
+        guard tool == .beauty, !aiRunning, faces.count > 1 else { return }
+        var best: (index: Int, distance: CGFloat)?
+        for (i, face) in faces.enumerated() {
+            let area = face.box.insetBy(dx: -face.box.width * 0.35, dy: -face.box.height * 0.45)
+            guard area.contains(point) else { continue }
+            let d = hypot(point.x - face.box.midX, point.y - face.box.midY)
+            if best == nil || d < best!.distance { best = (i, d) }
+        }
+        if let best { selectFace(best.index) }
+    }
+
+    /// 所有脸当前的修改：先是各张脸的 AI 结果，再是各张脸的手动美颜。
+    private func faceLayers() -> (edits: [AIEdit], beauties: [BeautyParams]) {
+        var edits: [AIEdit] = []
+        var beauties: [BeautyParams] = []
+        for i in faces.indices {
+            let edit = i == faceIndex ? currentAIEdit : faceStates[i]?.edit
+            let params = i == faceIndex ? beauty : (faceStates[i]?.beauty ?? BeautyParams())
+            if let edit { edits.append(edit) }
+            if !params.isIdentity { beauties.append(params) }
+        }
+        return (edits, beauties)
+    }
+
+    private func faceOps() -> [EditOp] {
+        let layers = faceLayers()
+        return layers.edits.map { EditOp.ai($0) } + layers.beauties.map { EditOp.beauty($0) }
+    }
+
+    func setBeauty(_ key: BeautyKey, _ value: CGFloat) {
+        beauty[key] = value < 0.02 ? 0 : value
+        beautyPreset = nil
+        renderAI()
+    }
+
+    func applyBeautyPreset(_ preset: BeautyPreset?) {
+        beauty.set(preset)
+        beautyPreset = preset?.id
+        renderAI()
+    }
+
+    func setLipColor(_ index: Int) {
+        beauty.lipColor = index
+        if beauty[.lips] == 0 { beauty[.lips] = 0.5 }
+        beautyPreset = nil
+        renderAI()
+    }
+
+    private func faceKey(_ style: BeautyStyle) -> String { "\(faceIndex)|\(style.id)" }
+
+    func isFaceStyleCached(_ style: BeautyStyle) -> Bool { cachedFaceKeys.contains(faceKey(style)) }
+
+    /// AI 美颜：只把选中的那张脸裁出来发给服务商，结果只贴回脸部的椭圆范围。
+    /// 这张脸的这个风格之前生成过的话直接用记住的结果；force = true 时强制重新生成。
+    func runFaceAI(_ style: BeautyStyle, force: Bool = false) {
+        guard tool == .beauty, !aiRunning, faces.indices.contains(faceIndex) else { return }
+        let key = faceKey(style)
+        if !force, let cached = faceCache[key] {
+            aiError = nil
+            aiUsageText = nil
+            beautyStyle = style.id
+            aiFrame = cached.frame
+            aiEllipse = cached.ellipse
+            aiResult = cached.image
+            aiHasResult = true
+            renderAI()
+            return
+        }
+        let face = faces[faceIndex]
+        let size = pixelSize()
+        let crop = faceFrame(face, factor: 2.0)
+        let bw = face.box.width * size.width
+        let bh = face.box.height * size.height
+        let cx = face.box.midX * size.width
+        let cy = face.box.midY * size.height - bh * 0.1
+        let ellipse = CGRect(x: (cx - bw * 0.66) / size.width, y: (cy - bh * 0.82) / size.height,
+                             width: bw * 1.32 / size.width, height: bh * 1.64 / size.height)
+        beautyStyle = style.id
+        aiFrame = crop
+        aiEllipse = ellipse
+        pendingFaceKey = key
+        launchAI(prompt: BeautyStyle.preamble + " " + style.prompt, strokes: [], crop: crop, guidance: false, identity: true)
+    }
+
+    /// 对当前显示的这个风格重新生成一次（会再调用一次接口）。
+    func regenerateFaceAI() {
+        guard let style = BeautyStyle.all.first(where: { $0.id == beautyStyle }) else { return }
+        runFaceAI(style, force: true)
+    }
+
+    /// 换了服务商之后，把刚才那次请求原样重发。
+    func retryAI() {
+        if tool == .beauty {
+            if let style = BeautyStyle.all.first(where: { $0.id == beautyStyle }) { runFaceAI(style, force: true) }
+        } else {
+            runAI()
+        }
+    }
+
+    func discardFaceAI() {
+        aiResult = nil
+        aiHasResult = false
+        beautyStyle = nil
+        renderAI()
+    }
+
+    // MARK: 保存
+
+    /// 用原图分辨率重新跑一遍所有操作，存进相册。
+    /// 按当前所有步骤算出来的成品是多少像素。
+    func outputSize() async -> CGSize? {
+        guard let source else { return nil }
+        let ops = self.ops
+        return await Task.detached(priority: .userInitiated) {
+            EditOp.apply(ops, to: source).extent.size
+        }.value
+    }
+
+    func export(_ options: SaveOptions = .saved) async -> Bool {
+        guard let source else { return false }
+        let ops = self.ops
+        var space = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        if let s = source.colorSpace, s.model == .rgb { space = s }
+        let data = await Task.detached(priority: .userInitiated) { () -> Data? in
+            var out = EditOp.apply(ops, to: source)
+            out = out.transformed(by: CGAffineTransform(translationX: -out.extent.minX, y: -out.extent.minY))
+            if let side = options.size.maxSide { out = Renderer.shared.downscaled(out, maxDimension: side) }
+            let quality = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
+            let context = Renderer.shared.context
+            switch options.format {
+            case .jpeg:
+                return context.jpegRepresentation(of: out, colorSpace: space, options: [quality: options.size.quality])
+            case .heic:
+                return context.heifRepresentation(of: out, format: .RGBA8, colorSpace: space,
+                                                  options: [quality: options.size.quality])
+            case .png:
+                return context.pngRepresentation(of: out, format: .RGBA8, colorSpace: space)
+            }
+        }.value
+        guard let data else { return false }
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                let creation = PHAssetResourceCreationOptions()
+                creation.uniformTypeIdentifier = options.format.typeIdentifier
+                PHAssetCreationRequest.forAsset().addResource(with: .photo, data: data, options: creation)
+            }
+            if HistoryStore.shared.enabled {
+                await HistoryStore.shared.add(data: data, ext: options.format == .jpeg ? "jpg" : options.format.rawValue,
+                                              source: "修图")
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+}
