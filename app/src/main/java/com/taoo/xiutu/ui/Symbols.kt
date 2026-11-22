@@ -392,4 +392,6 @@ private val SYMBOLS: Map<String, ImageVector> = mapOf(
     "square.split.2x2" to Icons.Filled.GridView,
     "arrow.left" to Icons.AutoMirrored.Filled.ArrowBack,
     "arrow.right" to Icons.AutoMirrored.Filled.ArrowForward,
+    // 美妆
+    "hand.raised.fingers.spread" to Icons.Filled.FrontHand,
 )
