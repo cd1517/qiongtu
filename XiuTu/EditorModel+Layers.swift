@@ -76,15 +76,29 @@ extension EditorModel {
 
     // MARK: AI 融合
 
-    /// 融合用的指令。
-    static let fusePrompt = """
-    这张图是把几张照片叠在一起的粗合成（底下是一张照片，上面贴了抠出来的人物或物体）。请把它融合成一张真实、自然、像一次拍下来的照片：\
-    统一所有元素的光线方向和强弱、色温色调、反差、景深虚实、清晰度和画质噪点；\
-    给贴上去的人和物体补上符合场景的阴影、反光和与地面的接触，让它们真的站在、放在这个场景里；\
-    修掉抠图留下的硬边、白边和残留背景，发丝边缘自然；按场景的透视和远近关系让大小比例合理。\
-    每个元素在画面里的位置和整体构图基本不变，画面比例不变。人物的长相、发型、服装和姿势不变，必须还是同一个人；物体的形状和细节不变。\
-    后面附的几张图是各个图层的原图，用来保持人物和物体的细节，不要把它们另外拼进画面。结果必须是一张真实的照片，不要插画感。
-    """
+    /// 融合用的指令。按每一层是什么（抠好的主体还是整张照片）、底下的照片里有没有人来拼。
+    static func fusePrompt(layers: [ImageLayer], baseHasPerson: Bool) -> String {
+        var lines = [
+            "第 1 张图是把几张照片叠在一起的粗合成，位置只是大概摆的。请参考后面附的原图，把它们重新合成为一张真实、自然、像一次拍下来的照片。",
+            "第 2 张图是最底下的原照片。",
+        ]
+        if baseHasPerson {
+            lines.append("【最重要】原照片里的人物是这张照片的主角：合成后人物必须完整地露出来、站在最前面，长相、发型、服装、姿势和身材比例都不变，必须还是同一个人。粗合成里如果有图层挡住了人，那是摆放的问题，不要照着挡。")
+        }
+        for (i, layer) in layers.enumerated() {
+            let n = i + 3
+            if layer.cutout {
+                lines.append("第 \(n) 张图是抠好的主体（人或物体），要放进画面里、大致在粗合成里的位置，形状和细节不变。")
+            } else if baseHasPerson {
+                lines.append("第 \(n) 张图是一张完整的场景照片：把它当成新的背景和环境，放在人物身后，让人物看起来就站在这个地方，人物脚下的地面和周围环境要和这个场景连贯。")
+            } else {
+                lines.append("第 \(n) 张图是一张照片，按粗合成里的位置和大小把它的内容自然地融进画面。")
+            }
+        }
+        lines.append("统一所有元素的光线方向和强弱、色温色调、反差、景深虚实、清晰度和画质；给人和物体补上符合场景的阴影、反光和与地面的接触；修掉抠图的硬边、白边和残留背景，发丝边缘自然；按场景的透视让大小比例合理。画面比例和第 1 张一致。")
+        lines.append("附的原图只用来参考和保持细节，不要把它们原样拼贴进画面，也不要出现拼贴的边框。结果必须是一张真实的照片，不要插画感。")
+        return lines.joined(separator: "\n")
+    }
 
     /// AI 融合：把下面的照片和所有图层交给 AI，融成一张自然的照片。完成后图层这一步和融合结果都写进历史，可以撤销。
     func fuseLayers() {
@@ -95,17 +109,24 @@ extension EditorModel {
         }
         let state = layerState
         let stack = LayerStack(layers: state.layers)
-        let references = state.layers.filter { !$0.hidden }.prefix(3).map { UIImage(cgImage: $0.content) }
+        let visible = Array(state.layers.filter { !$0.hidden }.suffix(3))
+        let baseImage = state.backgroundThumb
         layerState.busy = true
         layerState.fusing = true
         layerState.fuseStarted = Date()
         layerState.note = nil
         Task { [weak self] in
             do {
+                // 底下的照片里有没有人：有人就以人为主角，整张照片的图层当背景。
+                let hasPerson = await Task.detached(priority: .userInitiated) { () -> Bool in
+                    guard let cg = baseImage?.cgImage else { return false }
+                    return !FaceDetector.detect(in: cg).isEmpty || PersonSegmenter.mask(for: cg) != nil
+                }.value
+                let references = (baseImage.map { [$0] } ?? []) + visible.map { UIImage(cgImage: $0.content) }
                 _ = AIClient.takeLastUsage()
-                let result = try await AIRunner.run(endpoint: endpoint, prompt: Self.fusePrompt, proxy: proxy,
-                                                    ops: state.prefix + [.layers(stack)], strokes: [], crop: nil,
-                                                    appendGuidance: false, references: Array(references))
+                let result = try await AIRunner.run(endpoint: endpoint, prompt: Self.fusePrompt(layers: visible, baseHasPerson: hasPerson),
+                                                    proxy: proxy, ops: state.prefix + [.layers(stack)], strokes: [], crop: nil,
+                                                    appendGuidance: false, references: references)
                 _ = AIClient.takeLastUsage()
                 guard let self, self.tool == .layers else { return }
                 self.layerState.busy = false
